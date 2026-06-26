@@ -162,6 +162,12 @@ html,body{width:100%;height:100%;overflow:hidden;display:flex;
 .input-row textarea:focus{border-color:var(--md-sys-color-primary)}
 .input-row textarea::placeholder{color:var(--md-sys-color-on-surface-variant)}
 
+/* ── Emoji Picker ── */
+.emoji-picker{display:none;flex-wrap:wrap;gap:4px;padding:8px;margin-top:4px;background:var(--md-sys-color-surface-container-highest);border-radius:var(--shape-sm);max-width:320px;max-height:200px;overflow-y:auto}
+.emoji-picker.show{display:flex}
+.emoji-picker span{cursor:pointer;font-size:20px;padding:4px;border-radius:4px;transition:background var(--motion-duration-short)}
+.emoji-picker span:hover{background:var(--state-hover)}
+
 /* ── Sidebar ── */
 .sidebar-header{padding:var(--sp-md) var(--sp-lg);border-bottom:1px solid var(--md-sys-color-outline-variant);display:flex;align-items:center;justify-content:space-between}
 .sidebar-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--md-sys-color-on-surface-variant)}

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>X-Relay</title>
+  <style>
+    :root{--bg:#0f172a;--bg2:#1a2332;--bg3:#243044;--fg:#e2e8f0;--fg2:#94a3b8;--fg3:#64748b;--accent:#14b8a6;--border:#334155;--red:#ef4444;--green:#22c55e;--amber:#f59e0b;--radius:10px}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px 80px}
+    .lobby{max-width:640px;width:100%}
+    .lobby h1{font-size:28px;color:var(--accent);text-align:center;margin-bottom:4px}
+    .lobby .sub{text-align:center;color:var(--fg3);margin-bottom:20px;font-size:13px}
+    .toolbar{display:flex;gap:8px;margin-bottom:20px;justify-content:center;flex-wrap:wrap}
+    .toolbar button{background:var(--bg2);color:var(--accent);border:1px solid var(--border);padding:8px 18px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;transition:all .15s}
+    .toolbar button:hover{background:var(--bg3);border-color:var(--accent)}
+    .toolbar button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .room-list{display:flex;flex-direction:column;gap:8px}
+    .room-card{display:flex;align-items:center;gap:12px;padding:14px 18px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s;text-decoration:none;color:inherit}
+    .room-card:hover{border-color:var(--accent);background:var(--bg3)}
+    .room-card .icon{font-size:20px;flex-shrink:0}
+    .room-card .info{flex:1;min-width:0}
+    .room-card .name{font-size:15px;font-weight:600}
+    .room-card .meta{font-size:12px;color:var(--fg2);margin-top:2px}
+    .badge{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;flex-shrink:0}
+    .badge.on{background:var(--green);color:#fff}
+    .badge.off{background:var(--fg3);color:#fff}
+    .actions{display:flex;gap:4px;flex-shrink:0}
+    .actions button{background:none;border:none;cursor:pointer;font-size:14px;padding:4px 6px;border-radius:4px;opacity:.6;transition:all .15s}
+    .actions button:hover{opacity:1;background:var(--bg3)}
+    .btn-delete:hover{color:var(--red)!important}
+    .empty{text-align:center;padding:40px;color:var(--fg3)}
+    .public-room{margin-top:16px;padding:14px 18px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);text-align:center}
+    .public-room a,.footer-links a{color:var(--accent);text-decoration:none}
+    .public-room a:hover,.footer-links a:hover{text-decoration:underline}
+    .footer-links{text-align:center;margin-top:20px;font-size:12px;color:var(--fg3);display:flex;justify-content:center;gap:16px}
+    .lang-switch{cursor:pointer;background:none;border:1px solid var(--border);color:var(--fg2);padding:4px 12px;border-radius:12px;font:inherit;font-size:12px}
+    .lang-switch:hover{color:var(--accent);border-color:var(--accent)}
+    .toast{position:fixed;top:16px;right:16px;background:var(--accent);color:#fff;padding:8px 18px;border-radius:6px;font-size:13px;z-index:9999;opacity:0;transform:translateY(-8px);transition:all .2s;pointer-events:none}
+    .toast.on{opacity:1;transform:translateY(0)}
+    .dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:none;align-items:center;justify-content:center}
+    .dialog-overlay.show{display:flex}
+    .dialog{background:var(--bg2);border-radius:var(--radius);padding:24px;width:400px;max-width:92vw;border:1px solid var(--border)}
+    .dialog h3{font-size:18px;margin-bottom:16px;color:var(--accent)}
+    .dialog label{display:block;font-size:12px;color:var(--fg2);margin-bottom:4px;margin-top:12px}
+    .dialog label:first-of-type{margin-top:0}
+    .dialog input[type=text],.dialog input[type=password]{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:14px;outline:none}
+    .dialog input:focus{border-color:var(--accent)}
+    .dialog .hint{font-size:11px;color:var(--fg3);margin-top:2px}
+    .dialog .checkbox-row{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer}
+    .dialog .checkbox-row input{accent-color:var(--accent)}
+    .dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+    .dialog .actions button{padding:8px 20px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font:inherit;font-size:13px;font-weight:600}
+    .btn-cancel{background:var(--bg);color:var(--fg)}
+    .btn-submit{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .btn-danger{background:var(--red);color:#fff;border-color:var(--red)}
+    .share-box{display:flex;gap:8px;margin-top:8px}
+    .share-box input{flex:1}
+    .share-box button{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}
+  </style>
+</head>
+<body>
+  <div class="toast" id="toast"></div>
+  <div class="lobby">
+    <h1>X-Relay</h1>
+    <p class="sub" id="lobbyDesc"></p>
+    <div class="toolbar">
+      <button onclick="loadRooms()" id="btnRefresh"></button>
+      <button class="primary" onclick="showCreateDlg()" id="btnCreate"></button>
+    </div>
+    <div class="room-list" id="roomList"></div>
+    <div class="public-room" id="publicChannel"></div>
+    <div class="footer-links">
+      <a href="https://github.com/stop666two/X-Relay" target="_blank" rel="noopener noreferrer">⭐ GitHub</a>
+      <button class="lang-switch" onclick="toggleLang()" id="btnLang">🌐 EN</button>
+    </div>
+  </div>
+
+  <div class="dialog-overlay" id="createDlg"><div class="dialog">
+    <h3 id="createTitle"></h3>
+    <label id="lblName"></label><input type="text" id="roomName" maxlength="32" autocomplete="off">
+    <label id="lblPwd"></label><input type="password" id="roomPwd" autocomplete="off">
+    <div class="hint" id="hintPwd"></div>
+    <label id="lblDel"></label><input type="password" id="delPwd" autocomplete="off">
+    <div class="hint" id="hintDel"></div>
+    <div class="checkbox-row"><input type="checkbox" id="roomVisible" checked> <span id="lblVisible"></span></div>
+    <div class="actions"><button class="btn-cancel" onclick="hideCreateDlg()" id="btnCancel"></button><button class="btn-submit" onclick="doCreate()" id="btnCreate2"></button></div>
+  </div></div>
+
+  <div class="dialog-overlay" id="deleteDlg"><div class="dialog">
+    <h3 id="deleteTitle"></h3>
+    <p style="font-size:13px;color:var(--fg2);margin-bottom:12px" id="deleteInfo"></p>
+    <p style="font-size:12px;color:var(--amber);margin-bottom:12px" id="deleteWarn"></p>
+    <label id="lblDelPwd"></label><input type="password" id="delPwdInput" autocomplete="off">
+    <div class="actions"><button class="btn-cancel" onclick="hideDeleteDlg()" id="btnCancelDel"></button><button class="btn-danger" onclick="doDelete()" id="btnConfirmDel"></button></div>
+  </div></div>
+
+  <div class="dialog-overlay" id="shareDlg"><div class="dialog">
+    <h3 id="shareTitle"></h3>
+    <label id="lblLink"></label>
+    <div class="share-box"><input type="text" id="shareLink" readonly><button onclick="copyShare()" id="btnCopy"></button></div>
+    <div class="hint" id="shareHint"></div>
+    <div class="actions"><button class="btn-submit" onclick="hideShareDlg()" id="btnClose"></button></div>
+  </div></div>
+
+  <script src="./i18n.js"></script>
+  <script>
+    let _curDel = null;
+
+    function toggleLang() {
+      setLang(lang === 'zh-CN' ? 'en' : 'zh-CN');
+      updateUI();
+      loadRooms();
+    }
+
+    function updateUI() {
+      document.title = t('appName');
+      document.getElementById('lobbyDesc').textContent = t('appDesc');
+      document.getElementById('btnRefresh').textContent = '🔄 ' + t('refresh');
+      document.getElementById('btnCreate').textContent = t('createRoom');
+      document.getElementById('btnLang').textContent = lang === 'zh-CN' ? '🌐 EN' : '🌐 中文';
+      document.getElementById('publicChannel').innerHTML = t('publicChannelDesc') + ' <a href="/chat">' + t('publicChannel') + '</a>';
+      document.getElementById('createTitle').textContent = t('newRoom');
+      document.getElementById('lblName').textContent = t('roomName') + ' *';
+      document.getElementById('roomName').placeholder = t('roomNamePlaceholder');
+      document.getElementById('lblPwd').textContent = t('roomPassword');
+      document.getElementById('roomPwd').placeholder = t('roomPasswordPlaceholder');
+      document.getElementById('hintPwd').textContent = t('roomPasswordHint');
+      document.getElementById('lblDel').textContent = t('deletionPassword') + ' *';
+      document.getElementById('delPwd').placeholder = t('deletionPasswordPlaceholder');
+      document.getElementById('hintDel').textContent = t('deletionPasswordPlaceholder');
+      document.getElementById('lblVisible').textContent = t('showInLobby');
+      document.getElementById('btnCancel').textContent = t('cancel');
+      document.getElementById('btnCreate2').textContent = t('save');
+      document.getElementById('deleteTitle').textContent = t('deleteRoom');
+      document.getElementById('deleteWarn').textContent = '⚠️ ' + t('deleteRoomWarning');
+      document.getElementById('lblDelPwd').textContent = t('deletionPassword');
+      document.getElementById('delPwdInput').placeholder = t('deletePwdPlaceholder');
+      document.getElementById('btnCancelDel').textContent = t('cancel');
+      document.getElementById('btnConfirmDel').textContent = t('confirm');
+      document.getElementById('shareTitle').textContent = t('shareRoom');
+      document.getElementById('lblLink').textContent = t('shareLink');
+      document.getElementById('btnCopy').textContent = t('copy');
+      document.getElementById('btnClose').textContent = t('close');
+    }
+
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('on');
+      setTimeout(() => t.classList.remove('on'), 2000);
+    }
+
+    async function loadRooms() {
+      const list = document.getElementById('roomList');
+      list.innerHTML = '<div class="empty">' + t('loading') + '</div>';
+      try {
+        const res = await fetch('/api/rooms');
+        const rooms = await res.json();
+        if (!rooms.length) {
+          list.innerHTML = '<div class="empty">' + t('noRooms') + '</div>';
+          return;
+        }
+        const enc = t('encryptedRoom'), pub = t('publicRoom'), on = t('online'), emp = t('empty'), uon = t('usersOnline');
+        list.innerHTML = rooms.map(r => `
+          <a class="room-card" href="/${r.id}">
+            <span class="icon">${r.encrypted ? '🔒' : '🌐'}</span>
+            <div class="info">
+              <div class="name">${r.name}</div>
+              <div class="meta">${r.encrypted ? enc : pub} · ${r.online} ${uon}</div>
+            </div>
+            <span class="badge ${r.online?'on':'off'}">${r.online ? r.online + ' ' + on : emp}</span>
+            <span class="actions">
+              <button class="btn-copy" data-id="${r.id}" data-name="${r.name}" data-enc="${r.encrypted}">🔗</button>
+              <button class="btn-delete" data-id="${r.id}" data-name="${r.name}">🗑️</button>
+            </span>
+          </a>
+        `).join('');
+      } catch(e) { list.innerHTML = '<div class="empty">' + t('loadFailed') + '</div>'; }
+    }
+
+    function showCreateDlg() { document.getElementById('createDlg').classList.add('show'); document.getElementById('roomName').focus(); }
+    function hideCreateDlg() { document.getElementById('createDlg').classList.remove('show'); }
+
+    async function sha256(s) { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+
+    async function doCreate() {
+      const name = document.getElementById('roomName').value.trim();
+      const pwdRaw = document.getElementById('roomPwd').value.trim();
+      const delPwd = document.getElementById('delPwd').value.trim();
+      if (!name) { toast(t('roomNameRequired')); return; }
+      if (!delPwd) { toast(t('deletionPasswordRequired')); return; }
+      const pwd = pwdRaw ? await sha256(pwdRaw) : '';
+      try {
+        const res = await fetch('/api/rooms', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,password:pwd,deletionPassword:delPwd,visibleInLobby:document.getElementById('roomVisible').checked}) });
+        if (res.ok) {
+          const data = await res.json(); hideCreateDlg(); toast(t('roomCreated'));
+          setTimeout(() => location.href = '/' + data.roomKey, 800);
+        } else {
+          const err = await res.json(); toast(t('createFailed') + ': ' + (err.error || t('error')));
+        }
+      } catch(e) { toast(t('createFailed')); }
+    }
+
+    function showDelete(roomId, name) {
+      _curDel = roomId;
+      document.getElementById('deleteInfo').textContent = t('deleteRoomConfirm') + ': ' + name;
+      document.getElementById('deleteDlg').classList.add('show');
+      document.getElementById('delPwdInput').value = '';
+      document.getElementById('delPwdInput').focus();
+    }
+    function hideDeleteDlg() { document.getElementById('deleteDlg').classList.remove('show'); _curDel = null; }
+
+    async function doDelete() {
+      if (!_curDel) return;
+      const pwd = document.getElementById('delPwdInput').value.trim();
+      if (!pwd) { toast(t('deletePwdPlaceholder')); return; }
+      try {
+        const res = await fetch('/api/rooms/' + _curDel, { method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({deletionPassword:pwd}) });
+        if (res.ok) { hideDeleteDlg(); loadRooms(); toast(t('deleteRoomSuccess')); }
+        else toast(t('deletePwdWrong'));
+      } catch(e) { toast(t('deleteFailed')); }
+    }
+
+    function showShare(roomId, name, encrypted) {
+      document.getElementById('shareDlg').classList.add('show');
+      document.getElementById('shareLink').value = location.origin + '/' + roomId;
+      document.getElementById('shareHint').textContent = encrypted ? t('encryptedRoom') + ' — ' + t('roomPasswordHint') : t('publicRoom');
+    }
+    function hideShareDlg() { document.getElementById('shareDlg').classList.remove('show'); }
+    function copyShare() {
+      const link = document.getElementById('shareLink'); link.select();
+      navigator.clipboard?.writeText(link.value).then(() => toast(t('shareLinkCopied'))).catch(() => toast(t('shareLinkCopyFailed')));
+    }
+
+    document.querySelectorAll('.dialog-overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show') }));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideCreateDlg(); hideDeleteDlg(); hideShareDlg(); } });
+
+    document.getElementById('roomList').addEventListener('click', e => {
+      const bc = e.target.closest('.btn-copy'), bd = e.target.closest('.btn-delete');
+      e.preventDefault(); e.stopPropagation();
+      if (bc) showShare(bc.dataset.id, bc.dataset.name, bc.dataset.enc === 'true');
+      else if (bd) showDelete(bd.dataset.id, bd.dataset.name);
+    });
+
+    updateUI();
+    loadRooms();
+    setInterval(loadRooms, 15000);
+  </script>
+</body>
+</html>

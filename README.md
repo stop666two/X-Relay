@@ -6,8 +6,6 @@
 [![GitHub](https://img.shields.io/badge/GitHub-stop666two%2FX--Relay-blue?logo=github)](https://github.com/stop666two/X-Relay)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/stop666two/X-Relay"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" /></a>
-
 ## ✨ 特性
 
 - 🚀 **零安装** — 打开浏览器即可使用
@@ -31,6 +29,8 @@
 - 🔗 **分享链接** — 一键复制房间链接
 - 🗑️ **删除房间** — 删除密码保护，完全清除数据
 - 🔒 **安全** — HMAC-SHA256 加盐哈希，crypto 安全随机 key
+- 😊 **Emoji 选择器** — 输入框旁一键插入表情
+- 🌐 **国际化** — 中/English 双语切换，自动检测浏览器语言
 
 ## 🚀 快速开始
 
@@ -41,35 +41,37 @@ npm run start [端口]    # 默认 8081
 
 打开浏览器访问 `http://localhost:8081`
 
-## ☁️ 部署到 Cloudflare Workers
+## 🖥 部署
 
-点击上方 **Deploy to Cloudflare Workers** 按钮，一键部署 Worker + 静态资源 + D1 数据库（自动创建），全球 CDN 加速，WebSocket 原生支持。点完就能用。
+### 局域网
 
-### 局域网 / VPS 部署（Node.js 版）
+内网机器启动服务端，其他设备通过 IP 访问：
 
 ```bash
-npm install
-npm run start 8081
-
-# 其他设备访问 http://<IP>:8081
+npm install && npm run start 8081
+# 其他设备访问 http://192.168.1.100:8081
 ```
 
-### Nginx 反向代理（可选）
+### 公网服务器
+
+```bash
+# 上传项目
+scp -r . user@server:/opt/x-relay
+# 启动
+ssh user@server "cd /opt/x-relay && npm install && npm run start 8081"
+```
+
+### Nginx 反代 (可选)
 
 ```nginx
 server {
     listen 443 ssl;
     server_name relay.example.com;
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
     location / {
         proxy_pass http://127.0.0.1:8081;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
@@ -77,121 +79,56 @@ server {
 ## 📖 使用方式
 
 ### 大厅 `/`
-- **创建房间** — 设置名称、密码（可选）、删除密码、大厅可见性
+- **创建房间** — 设置名称、密码、删除密码、大厅可见性
 - **房间卡片** — 点击进入 / 🔗 分享 / 🗑️ 删除
 - **公共频道** — 无需密码，所有人可加入
 - **GitHub 链接** — 底部可跳转项目主页
 
 ### 房间 `/<roomKey>`
 - 公开房间：直接进入
-- 加密房间：输入密码（消息端到端加密）
+- 加密房间：输入密码
 - 房间头部：🏠 返回大厅 / 🔗 分享 / 🗑️ 删除
-
-### 聊天
-- Enter 发送，Shift+Enter 换行
-- 点击消息的 ↩️ 可视化引用回复
-- 点击消息的 ✏️ 编辑 / 🗑️ 删除
-- Ctrl+K 搜索，Ctrl+L 清屏
-- 拖拽文件或粘贴图片发送
-
-## 🏗 房间配置（可选）
-
-创建 `room_pwd.json`（密码填写 SHA-256 哈希值）：
-
-```json
-[
-  {
-    "roomId": "myroom",
-    "pwd": "sha256(你的密码)",
-    "turns": [{
-      "urls": ["turn:example.com:3478"],
-      "username": "user",
-      "credential": "pass"
-    }]
-  }
-]
-```
 
 ## 🔐 安全
 
 | 措施 | 说明 |
 |------|------|
-| 密码传输 | 原始密码不离开浏览器，SHA-256 → HMAC 后传输 |
-| 密码存储 | `HMAC-SHA256(SHA256, roomKey)` 每房间独立盐 |
-| 删除密码 | HMAC-SHA256 加密存储，非明文 |
-| 房间 key | `crypto.randomBytes` 密码学安全随机 |
-| 用户 ID | `crypto.randomBytes` 密码学安全随机 |
-| 消息加密 | AES-256-GCM 端到端，服务端不可读 |
-| API 限流 | 20 次 / 10 秒 / IP |
-| 消息限流 | 10 条 / 秒 / 用户 |
-| 输入净化 | 剥离 `<>"'` 特殊字符 |
-| 路径安全 | 阻止敏感文件 / 目录访问 |
-| 数据清理 | 已删除消息 7 天后自动清除 |
-| 密码哈希 | 房间列表不暴露密码哈希值 |
-
-## 📡 API
-
-| 方法 | 地址 | 用途 |
-|------|------|------|
-| `GET` | `/api/rooms` | 列出可见房间 |
-| `POST` | `/api/rooms` | 创建房间 |
-| `DELETE` | `/api/rooms/:key` | 删除房间（需删除密码） |
-| `POST` | `/api/rooms/:key/clear` | 清空房间消息 |
+| 密码 | `HMAC-SHA256(SHA256, roomKey)` 每房间独立盐 |
+| 删除密码 | HMAC-SHA256 加密存储 |
+| 消息 | AES-256-GCM 端到端加密 |
+| API | 20 次/10 秒/IP 限流 |
+| WS | 10 条/秒/用户 限流 |
+| 输入 | 剥离 `<>"'` 特殊字符 |
+| 路径 | 阻止敏感文件/目录访问 |
+| 数据 | 已删除消息 7 天后自动清除 |
 
 ## 🛠 技术栈
 
-- **服务端**: Node.js + ws + better-sqlite3 ／ Cloudflare Workers + D1
+- **服务端**: Node.js + ws + better-sqlite3
 - **前端**: Vanilla JS + WebRTC + Material Design 3
-- **传输**: WebSocket（信令 / 消息）+ WebRTC DataChannel（文件）
-- **安全**: Web Crypto API（AES-GCM、PBKDF2、HMAC-SHA256）
-
-## 🏛 架构
-
-```
-┌──────────────────────────────────────────┐
-│  浏览器 A         浏览器 B              │
-│  ┌─────────┐     ┌─────────┐            │
-│  │ WebRTC  │◄───►│ WebRTC  │  文件 P2P  │
-│  └────┬────┘     └────┬────┘            │
-│       │ WebSocket     │                  │
-├───────┴────────────────┴────────────────┤
-│         Node.js 服务端                    │
-│  ┌────────────────────────────┐          │
-│  │ index.js   — HTTP + WS 入口 │          │
-│  │ auth.js    — 房间认证模块   │          │
-│  │ data.js    — 数据访问层     │          │
-│  │ db.js      — SQLite 持久化  │          │
-│  │                              │          │
-│  │ SQLite 表:                   │          │
-│  │  ├ messages   消息/编辑/删除  │          │
-│  │  ├ rooms      房间配置/密码   │          │
-│  │  └ nicknames  用户昵称历史    │          │
-│  │                              │          │
-│  │ 内存: sockets  在线连接池     │          │
-│  └────────────────────────────┘          │
-└──────────────────────────────────────────┘
-```
+- **安全**: Web Crypto API (AES-GCM, PBKDF2, HMAC-SHA256)
 
 ## 📂 项目结构
 
 ```
 X-Relay/
-├── index.js          # 服务入口 (Node.js 版)
-├── worker.js         # 服务入口 (Cloudflare Workers 版)
-├── auth.js           # 房间认证模块
+├── index.js          # 入口 (HTTP + WebSocket)
+├── auth.js           # 房间认证
 ├── data.js           # 数据访问层
-├── db.js             # SQLite 持久化层
+├── db.js             # SQLite 持久化
 ├── package.json
-├── wrangler.toml     # Cloudflare Workers 部署配置
-├── schema.sql        # D1 数据库 Schema
 ├── room_pwd.json     # 预设加密房间（可选）
 └── www/
-    ├── index.html     # 聊天室页面
-    ├── index.js       # 聊天室客户端逻辑
-    ├── lobby.html     # 大厅页面
-    ├── xchatuser.js   # WebRTC 用户类
-    └── style.css      # Material Design 3 样式
+    ├── index.html     # 聊天室
+    ├── lobby.html     # 大厅
+    ├── index.js       # 客户端逻辑
+    ├── xchatuser.js   # WebRTC
+    └── style.css      # 样式
 ```
+
+## ☁️ Cloudflare Workers
+
+目前暂不支持部署到 Cloudflare Workers。因个人能力有限，WebSocket 在 Workers 环境下的兼容性问题未能解决。未来如有大佬贡献 Workers 适配代码，将更新支持。
 
 ## 📄 免责声明
 

@@ -57,7 +57,7 @@ function sanitizePath(urlPath) {
   urlPath = path.normalize(urlPath).replace(/^[\/\\]+/, '');
   if (/\.\.(\/|\\)|(\/|\\)\.\.|^\.\./.test(urlPath)) return null;
   if (/^\.|\.db$/i.test(urlPath) || /room_pwd|package\.json|\.env|\.git|node_modules|\.pem|\.key|\.crt/i.test(urlPath)) return null;
-  return urlPath || 'index.html';
+  return urlPath || 'lobby.html';
 }
 
 // ── API rate limiter ────────────────────────────
@@ -124,16 +124,8 @@ const server = http.createServer(async (req, res) => {
   const urlPath = sanitizePath(decodeURIComponent(url));
   if (!urlPath) { res.writeHead(403); return res.end('Forbidden'); }
   let fp = path.join(WWW, urlPath);
-  if (!path.resolve(fp).startsWith(WWW + path.sep)) fp = path.join(WWW, 'index.html');
-  fs.stat(fp, (e, st) => {
-    if (e || !st.isFile()) {
-      // 根路径 → 大厅(index.html), 其他路径 → 聊天室(chat.html)
-      const fallback = (!urlPath || urlPath === 'index.html') ? 'index.html' : 'chat.html';
-      serveStatic(req, res, path.join(WWW, fallback));
-    } else {
-      serveStatic(req, res, fp);
-    }
-  });
+  if (!path.resolve(fp).startsWith(WWW + path.sep)) fp = path.join(WWW, 'lobby.html');
+  fs.stat(fp, (e, st) => serveStatic(req, res, (e || !st.isFile()) ? path.join(WWW, 'index.html') : fp));
 });
 
 server.listen(PORT, () => log(`X-Relay 已启动 → http://localhost:${PORT}`));

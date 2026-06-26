@@ -22,7 +22,7 @@ async function deriveKey(pw, room) {
   return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: new TextEncoder().encode('x-relay:' + room), iterations: 100000, hash: 'SHA-256' }, km, ENC, false, ['encrypt', 'decrypt']);
 }
 async function encrypt(t) { if (!roomKey) return t; const iv = crypto.getRandomValues(new Uint8Array(12)), ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, roomKey, new TextEncoder().encode(t)); return JSON.stringify({ v: 1, iv: ab2b64(iv), ct: ab2b64(ct) }); }
-async function decrypt(p) { if (!roomKey) return p; try { const { iv, ct } = JSON.parse(p); return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b642ab(iv) }, roomKey, b642ab(ct))); } catch (_) { return '[无法解密]'; } }
+async function decrypt(p) { if (!roomKey) return p; try { const { iv, ct } = JSON.parse(p); return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b642ab(iv) }, roomKey, b642ab(ct))); } catch (_) { return '['+t('encryptionFailed')+']'; } }
 
 // ── SHA-256 + HMAC ──────────────────────────────
 async function sha256(s) { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
@@ -100,8 +100,8 @@ function dateLabel(ts) {
   const d = new Date(Number(ts)), now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  if (msgDay === today) return '今天';
-  if (msgDay === today - DAY) return '昨天';
+  if (msgDay === today) return t('today');
+  if (msgDay === today - DAY) return t('yesterday');
   return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
 }
 function maybeDateSep(ts) {
@@ -116,14 +116,14 @@ function addMsg(uid, text, ts, msgId, nobroadcast) {
   maybeDateSep(ts);
   const el = document.createElement('div'); el.className = 'msg';
   el.dataset.mid = msgId; el.dataset.uid = uid; el.dataset.text = text; el.dataset.ts = ts;
-  const u = users.find(x => x.id === uid), name = uid === 'system' ? '系统' : (u?.nickname || uid),
+  const u = users.find(x => x.id === uid), name = uid === 'system' ? (lang === 'zh-CN' ? '系统' : 'System') : (u?.nickname || uid),
         sys = uid === 'system', mine = uid === me.id && !sys;
   const html = sys ? esc(text) : md2html(text);
   el.innerHTML = `<div class="msg-avatar" style="background:${ucolor(uid)}">${(name[0] || '?').toUpperCase()}</div>
     <div class="msg-body-wrap">
-      <div class="msg-head"><span class="msg-author${sys ? ' sys' : ''}">${mine ? '（我）' : ''}${esc(name)}</span><span class="msg-time" title="${new Date(Number(ts)).toLocaleString()}">${tfmt(ts)}</span></div>
+      <div class="msg-head"><span class="msg-author${sys ? ' sys' : ''}">${mine ? '(' + (lang === 'zh-CN' ? '我' : 'me') + ')' : ''}${esc(name)}</span><span class="msg-time" title="${new Date(Number(ts)).toLocaleString()}">${tfmt(ts)}</span></div>
       <div class="msg-text">${html}</div>
-      <div class="msg-actions">${!sys ? `<button class="msg-act" data-act="reply" title="回复">↩️</button><button class="msg-act" data-act="copy" title="复制">📋</button>${mine ? `<button class="msg-act" data-act="edit" title="编辑">✏️</button><button class="msg-act danger" data-act="delete" title="删除">🗑️</button>` : ''}` : ''}</div>
+      <div class="msg-actions">${!sys ? `<button class="msg-act" data-act="reply" title="${t('reply')}">↩️</button><button class="msg-act" data-act="copy" title="${t('copy')}">📋</button>${mine ? `<button class="msg-act" data-act="edit" title="${t('edit')}">✏️</button><button class="msg-act danger" data-act="delete" title="${t('msgDelete')}">🗑️</button>` : ''}` : ''}</div>
     </div>`;
   $('msgs').appendChild(el); scrollBottom();
   if (!nobroadcast && !mine && !sys) { beep(); unreadInc(); }
@@ -154,7 +154,7 @@ function addFileMsg(uid, file, ts, nobroadcast) {
   let body = isImg ? `<img class="msg-file-img" src="${file.url}" alt="${esc(file.name)}" onclick="window.open(this.src)">`
     : `<a class="msg-file-card" href="${file.url || '#'}" ${file.url ? `download="${esc(file.name)}"` : ''}><span class="msg-file-icon">${icon}</span><div class="msg-file-info"><div class="msg-file-name">${esc(file.name)}</div>${file.size ? `<div class="msg-file-size">${fsiz(file.size)}</div>` : ''}</div></a>`;
   el.innerHTML = `<div class="msg-avatar" style="background:${ucolor(uid)}">${(name[0] || '?').toUpperCase()}</div>
-    <div class="msg-body-wrap"><div class="msg-head"><span class="msg-author">${mine ? '（我）' : ''}${esc(name)}</span><span class="msg-time" title="${new Date(ts).toLocaleString()}">${tfmt(ts)}</span></div><div>${body}</div></div>`;
+    <div class="msg-body-wrap"><div class="msg-head"><span class="msg-author">${mine ? '(' + (lang === 'zh-CN' ? '我' : 'me') + ')' : ''}${esc(name)}</span><span class="msg-time" title="${new Date(ts).toLocaleString()}">${tfmt(ts)}</span></div><div>${body}</div></div>`;
   $('msgs').appendChild(el); scrollBottom();
   if (!nobroadcast && !mine) { beep(); unreadInc(); }
 }
@@ -163,7 +163,7 @@ function bindMsgActions(el) {
   el.querySelectorAll('.msg-act').forEach(btn => {
     btn.onclick = () => {
       const a = btn.dataset.act, txt = el.dataset.text, mid = el.dataset.mid;
-      if (a === 'copy') { navigator.clipboard?.writeText(txt).then(() => snack('已复制')); return; }
+      if (a === 'copy') { navigator.clipboard?.writeText(txt).then(() => snack(t('copied'))); return; }
       if (a === 'reply') { replyMsg(el); return; }
       if (a === 'edit') { editMsgInline(el, el.dataset.uid, txt, mid); return; }
       if (a === 'delete') { deleteMsgInline(el, el.dataset.uid, mid); return; }
@@ -177,7 +177,7 @@ function editMsgInline(el, uid, txt, mid) {
   textEl.style.display = 'none'; actEl.style.display = 'none'; el.classList.add('editing');
   const inp = document.createElement('textarea'); inp.className = 'msg-edit-input'; inp.value = txt;
   const btns = document.createElement('div'); btns.className = 'msg-edit-actions';
-  btns.innerHTML = '<button class="msg-edit-save">保存</button><button class="msg-edit-cancel">取消</button>';
+  btns.innerHTML = '<button class="msg-edit-save">'+t('save')+'</button><button class="msg-edit-cancel">'+t('cancel')+'</button>';
   wrap.appendChild(inp); wrap.appendChild(btns); inp.focus(); inp.setSelectionRange(txt.length, txt.length);
   btns.querySelector('.msg-edit-save').onclick = async () => {
     const nt = inp.value.trim(); if (!nt || nt === txt) { cancelEdit(); return; }
@@ -191,17 +191,17 @@ function editMsgInline(el, uid, txt, mid) {
 function cancelEdit() { if (!editingMsg) return; const e = editingMsg; e.textEl.style.display = ''; e.actEl.style.display = ''; e.inp.remove(); e.btns.remove(); e.el.classList.remove('editing'); editingMsg = null; }
 
 function deleteMsgInline(el, uid, mid) {
-  if (!confirm('删除此消息？')) return;
-  el.querySelector('.msg-text').innerHTML = '<span class="msg-deleted">此消息已删除</span>';
+  if (!confirm(t('deleteMsgConfirm'))) return;
+  el.querySelector('.msg-text').innerHTML = '<span class="msg-deleted">'+t('messageDeleted')+'</span>';
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ uid: me.id, targetId: me.id, type: '9011', data: { msgId: mid } }));
 }
 
 // ── User list ───────────────────────────────────
 function renderUsers() {
-  $('sidebarTitle').textContent = '在线 (' + users.length + ')';
+  $('sidebarTitle').textContent = t('online') + ' (' + users.length + ')';
   $('userList').innerHTML = users.map(u => {
     const on = u.isMe || u.isConnected(), lat = u.latency ? u.latency + 'ms' : '';
-    return `<li><div class="user-row"><div class="user-dot ${on ? 'on' : 'off'}"></div><div class="msg-avatar" style="background:${ucolor(u.id)};width:28px;height:28px;font-size:12px">${(u.nickname || u.id)[0]?.toUpperCase() || '?'}</div><div class="user-info"><div class="user-name">${esc(u.nickname || u.id)}${u.isMe ? '（我）' : ''}</div>${u.device ? `<div class="user-device">${esc(u.device)}</div>` : ''}</div>${lat ? `<div class="user-latency">${lat}</div>` : ''}</div></li>`;
+    return `<li><div class="user-row"><div class="user-dot ${on ? 'on' : 'off'}"></div><div class="msg-avatar" style="background:${ucolor(u.id)};width:28px;height:28px;font-size:12px">${(u.nickname || u.id)[0]?.toUpperCase() || '?'}</div><div class="user-info"><div class="user-name">${esc(u.nickname || u.id)}${u.isMe ? ' (' + (lang === 'zh-CN' ? '我' : 'me') + ')' : ''}</div>${u.device ? `<div class="user-device">${esc(u.device)}</div>` : ''}</div>${lat ? `<div class="user-latency">${lat}</div>` : ''}</div></li>`;
   }).join('');
 }
 
@@ -214,16 +214,16 @@ function refreshUsers(data) {
     return x;
   });
   const gone = users.filter(u => !next.find(n => n.id === u.id));
-  gone.forEach(u => { u.closeConnection(); if (!u.isMe && connTimes[u.id]) snack(esc(u.nickname || u.id) + ' 已离开'); });
+  gone.forEach(u => { u.closeConnection(); if (!u.isMe && connTimes[u.id]) snack(esc(u.nickname || u.id) + ' '+t('userLeft')); });
   const joined = next.filter(n => !users.find(o => o.id === n.id) && !n.isMe);
-  joined.forEach(n => { connTimes[n.id] = Date.now(); snack(esc(n.nickname || n.id) + ' 加入了房间'); });
+  joined.forEach(n => { connTimes[n.id] = Date.now(); snack(esc(n.nickname || n.id) + ' '+t('userJoined')); });
   users = next;
   users.forEach(u => {
     if (u.isMe) return;
     u.onReceiveFile = f => addFileMsg(u.id, f);
     u.onReceiveProgress = (got, total, name) => {
       $('sendProgress').style.display = 'block'; $('progFill').style.width = (got / total * 100) + '%';
-      $('progLabel').textContent = `接收 ${esc(name || '文件')} ${fsiz(got)}/${fsiz(total)}`;
+      $('progLabel').textContent = t('sendTo') + ' ' + esc(name || t('sendFile')) + ' ' + fsiz(got) + '/' + fsiz(total);
       if (got >= total) setTimeout(() => { $('sendProgress').style.display = 'none'; $('progFill').style.width = '0'; }, 500);
     };
   });
@@ -238,11 +238,11 @@ function connect() {
   const host = location.hostname + (location.port ? ':' + location.port : '');
   let room = location.pathname.replace(/^\//, '').split('/')[0];
   if (room === 'chat') room = '';
-  $('roomMeta').textContent = '连接中…';
+  $('roomMeta').textContent = t('connecting');
   const url = `${proto}://${host}/ws/${room}${pwd ? '/' + pwd.substring(0,8) + '...' : ''}`;
   console.log('[ws] connecting to:', url, 'hasPwd:', !!pwd);
   ws = new WebSocket(`${proto}://${host}/ws/${room}${pwd ? '/' + pwd : ''}`);
-  ws.onopen = () => { connecting = false; rcnt = 0; $('roomMeta').textContent = '已连接'; if (nick) ws.send(JSON.stringify({ uid: me.id, targetId: me.id, type: '9004', data: { nickname: nick } })); };
+  ws.onopen = () => { connecting = false; rcnt = 0; $('roomMeta').textContent = t('connected'); if (nick) ws.send(JSON.stringify({ uid: me.id, targetId: me.id, type: '9004', data: { nickname: nick } })); };
   ws.onmessage = async e => {
     let type, data; try { ({ type, data } = JSON.parse(e.data)); } catch (_) { return; }
 
@@ -260,10 +260,10 @@ function connect() {
     if (type === '1010') { data.text = await decrypt(data.text); addMsg(data.uid, data.text, data.ts, data.msgId); return; }
     if (type === '1011') { for (const m of data) { m.text = await decrypt(m.text); addMsg(m.uid, m.text, m.ts, m.msgId, true); } return; }
     if (type === '1012') { const el = $('msgs').querySelector(`[data-mid="${data.msgId}"]`); if (el) { el.querySelector('.msg-text').innerHTML = md2html(await decrypt(data.text)); el.dataset.text = await decrypt(data.text); } return; }
-    if (type === '1013') { const el = $('msgs').querySelector(`[data-mid="${data.msgId}"]`); if (el) el.querySelector('.msg-text').innerHTML = '<span class="msg-deleted">此消息已删除</span>'; return; }
-    if (type === '1014') { $('msgs').innerHTML = ''; _lastDate = ''; snack('聊天记录已清空'); return; }
+    if (type === '1013') { const el = $('msgs').querySelector(`[data-mid="${data.msgId}"]`); if (el) el.querySelector('.msg-text').innerHTML = '<span class="msg-deleted">'+t('messageDeleted')+'</span>'; return; }
+    if (type === '1014') { $('msgs').innerHTML = ''; _lastDate = ''; snack(t('chatCleared')); return; }
   };
-  ws.onclose = () => { if (connecting) return; $('roomMeta').textContent = '重连中…'; setTimeout(() => connect(), Math.min(1000 * Math.pow(2, rcnt), 30000)); rcnt++; };
+  ws.onclose = () => { if (connecting) return; $('roomMeta').textContent = t('reconnecting'); setTimeout(() => connect(), Math.min(1000 * Math.pow(2, rcnt), 30000)); rcnt++; };
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
 }
 
@@ -280,7 +280,7 @@ function handleREG(data) {
   // Unknown room
   if (!data.roomId) {
     connecting = true;
-    if (pendingRoom) { addMsg('system', '⚠️ 房间不存在，即将返回大厅…'); setTimeout(() => location.href = '/', 2000); }
+    if (pendingRoom) { addMsg('system', '' + t('roomNotFound') + ''); setTimeout(() => location.href = '/', 2000); }
     else { $('main').style.display = ''; $('sidebar').style.display = ''; }
     return;
   }
@@ -292,8 +292,8 @@ function handleREG(data) {
     data.turns.forEach(t => { const urls = [].concat(t.urls || []); if (!urls.some(u => existing.has(u))) window.xrelay_config.iceServers.push(t); });
   }
   ws.send(JSON.stringify({ uid: me.id, targetId: me.id, type: '9005', data: { device: dev() } }));
-  $('roomName').textContent = data.roomName || data.roomId || 'X-Relay 公共频道';
-  $('roomMeta').textContent = data.roomId ? (data.turns?.length ? '已连接 · 加密' : '已连接') : '公共频道';
+  $('roomName').textContent = data.roomName || data.roomId || 'X-Relay' + t('publicChannel');
+  $('roomMeta').textContent = data.roomId ? (data.turns?.length ? t('connected') + ' · ' + t('encrypted') : t('connected')) : t('publicChannel');
   $('btnShare').style.display = data.roomId ? '' : 'none';
   $('btnDeleteRoom').style.display = data.roomId ? '' : 'none';
   $('btnClearMsgs').style.display = data.roomId ? 'none' : '';
@@ -321,7 +321,7 @@ function showTyping(uid, is) {
   if (uid === me.id) return;
   clearTimeout(typingTimers[uid]);
   if (is) {
-    $('typingBar').innerHTML = esc((users.find(u => u.id === uid)?.nickname) || uid) + ' 正在输入 <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+    $('typingBar').innerHTML = esc((users.find(u => u.id === uid)?.nickname) || uid) + '' + t('typing') + '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
     typingTimers[uid] = setTimeout(() => { $('typingBar').innerHTML = ''; }, 3000);
   }
 }
@@ -347,12 +347,24 @@ $('msgInput').oninput = function () {
 };
 $('msgInput').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
 
+// ── Emoji picker ────────────────────────────
+const EMOJIS = '😀😃😄😁😅😂🤣😊😇🙂🙃😉😌😍🥰😘😗😙😚😋😛😝😜🤪🤨🧐🤓😎🤩🥳😏😒😞😔😟😕🙁😣😖😫😩🥺😢😭😤😠😡🤬🤯😳🥵🥶😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲🥱😴🤤😪😵🤐🥴🤢🤮🤧😷🤒🤕🤑🤠😈👿👹👺🤡💩👻💀👽👾🤖🎃😺😸😹😻😼😽🙀😿😾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝💟👍👎👌✌️🤞🤟🤘🤙👈👉👆👇🖕☝️✋🤚🖐️🖖👋🤏✍️👏🙌🤝🙏💪🦵🦶👂🦻👃🧠🦷🦴👀👁️👅👄';
+const emojiPicker = $('emojiPicker');
+EMOJIS.match(/.{1,2}/g).forEach(e => {
+  const span = document.createElement('span');
+  span.textContent = e;
+  span.onclick = () => { $('msgInput').value += e; $('msgInput').focus(); emojiPicker.classList.remove('show'); };
+  emojiPicker.appendChild(span);
+});
+$('btnEmoji').onclick = () => { emojiPicker.classList.toggle('show'); };
+document.addEventListener('click', e => { if (!emojiPicker.contains(e.target) && e.target !== $('btnEmoji')) emojiPicker.classList.remove('show'); });
+
 // ── Files ───────────────────────────────────────
 async function sendFiles(files) {
   const arr = Array.from(files); if (!arr.length) return;
   pfiles = arr;
   const others = users.filter(u => !u.isMe);
-  if (!others.length) { snack('没有在线用户'); return; }
+  if (!others.length) { snack(t('noOnlineUsers')); return; }
   const bi = $('fileBatchInfo');
   bi.innerHTML = arr.length === 1 ? '' : '<b>' + arr.length + ' 个文件</b>' + arr.map(f => `<div>${ficon(f.name)} ${esc(f.name)} (${fsiz(f.size)})</div>`).join('');
   if (others.length === 1) { await sendToOne(others[0], arr); pfiles = []; return; }
@@ -377,7 +389,7 @@ $('btnConfirmSend').onclick = async () => {
     });
     done += f.size;
   } if (cancelXfer) break; }
-  if (!cancelXfer) addMsg(me.id, '[文件] ' + pfiles.map(f => f.name).join(', '));
+  if (!cancelXfer) addMsg(me.id, t('fileSent') + ' ' + pfiles.map(f => f.name).join(', '));
   hide('sendDlg'); $('btnConfirmSend').disabled = false; $('progFill').style.width = '0'; pfiles = [];
 };
 async function sendToOne(u, files) {
@@ -391,7 +403,7 @@ async function sendToOne(u, files) {
     });
     done += f.size;
   }
-  if (!cancelXfer) addMsg(me.id, '[文件] ' + files.map(f => f.name).join(', '));
+  if (!cancelXfer) addMsg(me.id, t('fileSent') + ' ' + files.map(f => f.name).join(', '));
   hide('sendDlg'); $('btnConfirmSend').style.display = ''; $('progFill').style.width = '0';
 }
 
@@ -400,7 +412,7 @@ function openSearch() { show('searchDlg'); $('searchInput').value = ''; $('searc
 function doSearch() {
   const q = $('searchInput').value.toLowerCase().trim(), items = $('msgs').querySelectorAll('.msg'); let cnt = 0;
   items.forEach(el => { const tc = (el.textContent || '').toLowerCase(); if (!q) { el.style.display = ''; el.classList.remove('highlight'); cnt++; return; } if (tc.includes(q)) { el.style.display = ''; el.classList.add('highlight'); cnt++; } else { el.style.display = 'none'; el.classList.remove('highlight'); } });
-  $('searchCount').textContent = q ? '找到 ' + cnt + ' 条匹配' : '';
+  $('searchCount').textContent = q ? t('searchResults').replace('{n}', cnt) : '';
 }
 $('searchInput').oninput = () => { clearTimeout(window._st); window._st = setTimeout(doSearch, 150); };
 
@@ -412,7 +424,7 @@ function exportChat() {
     return `[${t}] ${h}: ${f || b}`;
   }).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([msgs], { type: 'text/plain' }));
-  a.download = 'xrelay-' + new Date().toISOString().slice(0, 10) + '.txt'; a.click(); snack('聊天记录已导出');
+  a.download = 'xrelay-' + new Date().toISOString().slice(0, 10) + '.txt'; a.click(); snack(t('chatExported'));
 }
 
 // ── Dialogs ─────────────────────────────────────
@@ -429,34 +441,42 @@ $('btnSaveNick').onclick = () => {
 // Room manage dialog
 function showRoomDlg() {
   const room = location.pathname.replace(/^\//, '').split('/')[0];
-  if (!room || room === 'chat') { snack('公共频道无需此操作'); return; }
+  if (!room || room === 'chat') { snack(t('publicChannelDesc')); return; }
   show('roomManageDlg');
   $('roomShareLink').value = location.origin + '/' + room;
-  $('roomShareHint').textContent = pwd ? '加密房间需告知对方密码' : '公开房间，无需密码即可加入';
+  $('roomShareHint').textContent = pwd ? t('encryptedRoom') : t('publicChannelDesc');
 }
-function copyRoomLink() { $('roomShareLink').select(); navigator.clipboard?.writeText($('roomShareLink').value).then(() => snack('链接已复制')); }
+function copyRoomLink() { $('roomShareLink').select(); navigator.clipboard?.writeText($('roomShareLink').value).then(() => snack(t('shareLinkCopied'))); }
 function showDeleteRoomDlg() { hide('roomManageDlg'); show('deleteRoomDlg'); $('delRoomPwdInput').value = ''; $('delRoomPwdInput').focus(); }
 
 async function doDeleteRoom() {
   const room = location.pathname.replace(/^\//, '').split('/')[0];
-  const dp = $('delRoomPwdInput').value.trim(); if (!dp) { snack('请输入删除密码'); return; }
+  const dp = $('delRoomPwdInput').value.trim(); if (!dp) { snack(t('deletionPasswordRequired')); return; }
   try {
     const res = await fetch('/api/rooms/' + room, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deletionPassword: dp }) });
-    if (res.ok) { hide('deleteRoomDlg'); snack('房间已删除'); setTimeout(() => location.href = '/', 1500); }
-    else snack('删除密码错误');
-  } catch (_) { snack('删除失败'); }
+    if (res.ok) { hide('deleteRoomDlg'); snack(t('deleteRoomSuccess')); setTimeout(() => location.href = '/', 1500); }
+    else snack(t('deletePwdWrong'));
+  } catch (_) { snack(t('deleteFailed')); }
 }
 
 // Theme & sound
 function toggleTheme() { document.body.classList.toggle('light'); localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark'); }
-function toggleSound() { soundOn = !soundOn; $('btnSound').classList.toggle('active', !soundOn); snack(soundOn ? '提示音已开启' : '提示音已关闭'); }
+function toggleSound() { soundOn = !soundOn; $('btnSound').classList.toggle('active', !soundOn); snack(soundOn ? t('soundOn') : t('soundOff')); }
 
 // ── Init ────────────────────────────────────────
 function init() {
-  if (!window.RTCPeerConnection && !window.webkitRTCPeerConnection) { addMsg('system', '⚠️ 浏览器不支持 WebRTC'); return; }
+  if (!window.RTCPeerConnection && !window.webkitRTCPeerConnection) { addMsg('system', t('noWebRTC')); return; }
   const t = localStorage.getItem('theme'); if (t === 'light') document.body.classList.add('light');
   else if (!t && matchMedia('(prefers-color-scheme:light)').matches) document.body.classList.add('light');
   const m = document.cookie.match(/nickname=([^;]+)/); if (m) nick = decodeURIComponent(m[1]);
+
+  // Apply i18n to static elements
+  $('msgInput').placeholder = t('inputPlaceholder');
+  $('searchInput').placeholder = t('searchPlaceholder');
+  $('btnFile').title = t('sendFile');
+  $('btnSend').title = t('send');
+  $('btnSearch').title = t('searchBtn');
+  $('btnSound').title = t('soundBtn');
 
   const room = location.pathname.replace(/^\//, '').split('/')[0];
   if (room && room !== 'chat') {
@@ -480,7 +500,7 @@ async function submitPwd() {
     connect();
   } catch (e) {
     console.error('[auth] submitPwd error:', e);
-    snack('加密失败: ' + (e.message || '未知错误'));
+    snack(t('encryptionFailed') + ': ' + (e.message || t('error')));
     show('pwdDlg');
   }
 }
@@ -500,9 +520,9 @@ $('btnFile').onclick = $('btnFileMob').onclick = () => { const i = document.crea
 $('btnSend').onclick = sendMsg;
 $('btnTheme').onclick = toggleTheme;
 $('btnSound').onclick = toggleSound;
-$('btnClear').onclick = () => { if (confirm('清空本地显示？')) { $('msgs').innerHTML = ''; _lastDate = ''; snack('已清空'); } };
+$('btnClear').onclick = () => { if (confirm(t('clearConfirm'))) { $('msgs').innerHTML = ''; _lastDate = ''; snack(t('cleared')); } };
 $('btnExport').onclick = $('btnExportMob').onclick = exportChat;
-$('btnClearMsgs').onclick = async () => { if (!confirm('清空公共频道所有聊天记录？此操作不可逆！')) return; try { await fetch('/api/rooms/internal/clear', { method: 'POST' }); } catch (_) { snack('清空失败'); } };
+$('btnClearMsgs').onclick = async () => { if (!confirm(t('clearAllConfirm'))) return; try { await fetch('/api/rooms/internal/clear', { method: 'POST' }); } catch (_) { snack(t('clearAllFailed')); } };
 $('btnRoom').onclick = showRoomDlg;
 $('btnShare').onclick = showRoomDlg;
 $('btnDeleteRoom').onclick = showDeleteRoomDlg;
@@ -513,7 +533,7 @@ $('btnSearch').onclick = openSearch;
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { hide('searchDlg'); hide('roomManageDlg'); hide('deleteRoomDlg'); if (editingMsg) cancelEdit(); }
   if (e.ctrlKey && e.key === 'k') { e.preventDefault(); openSearch(); }
-  if (e.ctrlKey && e.key === 'l') { e.preventDefault(); $('msgs').innerHTML = ''; snack('已清空'); }
+  if (e.ctrlKey && e.key === 'l') { e.preventDefault(); $('msgs').innerHTML = ''; snack(t('cleared')); }
 });
 
 ['dragenter', 'dragover'].forEach(ev => document.body.addEventListener(ev, e => { e.preventDefault(); document.body.classList.add('dragging'); }));
@@ -523,7 +543,7 @@ document.addEventListener('paste', e => { for (const item of (e.clipboardData?.i
 
 $('userList').addEventListener('contextmenu', e => {
   const li = e.target.closest('li'); if (!li) return;
-  const txt = li.querySelector('.user-name')?.textContent.replace('（我）', '').trim();
+  const txt = li.querySelector('.user-name')?.textContent.replace(' (' + (lang === 'zh-CN' ? '我' : 'me') + ')', '').trim();
   const u = users.find(x => (x.nickname || x.id) === txt || x.id === txt);
   if (u && !u.isMe) showCtx(e, u.id);
 });
@@ -541,4 +561,4 @@ function showCtx(e, uid) {
   setTimeout(() => document.addEventListener('click', () => m.style.display = 'none', { once: true }), 0);
 }
 function sendToId(uid) { $('ctxMenu').style.display = 'none'; const u = users.find(x => x.id === uid); if (!u) return; const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.onchange = e => { if (e.target.files.length) { pfiles = Array.from(e.target.files); showSendDlg([u]); } }; inp.click(); }
-function copyId(uid) { $('ctxMenu').style.display = 'none'; navigator.clipboard?.writeText(uid).then(() => snack('已复制')); }
+function copyId(uid) { $('ctxMenu').style.display = 'none'; navigator.clipboard?.writeText(uid).then(() => snack(t('copied'))); }
