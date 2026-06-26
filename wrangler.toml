@@ -1,5 +1,6 @@
-# X-Relay — Cloudflare Worker 配置
-# 一键部署: 点击 README 中的 Deploy 按钮
+# X-Relay — Cloudflare Worker
+# 点击 README 中的 Deploy 按钮一键部署
+# D1 数据库由 Cloudflare 自动创建
 
 name = "x-relay"
 main = "worker.js"
@@ -9,12 +10,7 @@ compatibility_date = "2025-06-26"
 [assets]
 directory = "./www"
 
-# D1 数据库 (部署后需手动创建: wrangler d1 create xrelay-db)
+# D1 数据库（不指定 id，Cloudflare 自动创建）
 [[d1_databases]]
 binding = "DB"
 database_name = "xrelay-db"
-database_id = "your-database-id"
-
-# 可观测性
-[observability]
-enabled = true

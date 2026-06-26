@@ -3,6 +3,46 @@
 //  WebSocket + HTTP API + D1 持久化
 // ═══════════════════════════════════════════
 
+// ── 安全工具 ────────────────────────────────
+function sanitize(str, max) {
+  return String(str || '').replace(/[<>"']/g, '').trim().slice(0, max);
+}
+
+function safeStr(str, max) {
+  return typeof str === 'string' ? str.slice(0, max) : '';
+}
+
+// ── 频率限制 (内存, 同 Node.js 版逻辑) ────────
+const apiRate = new Map();
+function checkApiRate(ip) {
+  const now = Date.now(), e = apiRate.get(ip) || { count: 0, reset: now + 10000 };
+  if (now > e.reset) { e.count = 0; e.reset = now + 10000; }
+  apiRate.set(ip, e);
+  return ++e.count <= 20;
+}
+
+const wsRate = new Map();
+function checkWsRate(uid) {
+  const now = Date.now(), e = wsRate.get(uid) || { count: 0, reset: now + 1000 };
+  if (now > e.reset) { e.count = 0; e.reset = now + 1000; }
+  wsRate.set(uid, e);
+  return ++e.count <= 10;
+}
+
+// 定期清理过期限流记录
+function pruneRateMaps() {
+  const now = Date.now();
+  for (const [k, v] of apiRate) if (now > v.reset + 120000) apiRate.delete(k);
+  for (const [k, v] of wsRate) if (now > v.reset + 60000) wsRate.delete(k);
+}
+
+// ── 安全响应头 ──────────────────────────────
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer'
+};
+
 // ── Crypto (Web Crypto, 同浏览器端一致) ─────
 async function sha256(s) {
   const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -160,21 +200,40 @@ class WSSManager {
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' }
+    headers: { 'Content-Type': 'application/json; charset=utf-8', ...SEC_HEADERS }
   });
 }
 
 // ── 主 Worker ───────────────────────────────
 export default {
   async fetch(request, env, ctx) {
-    await ensureSchema(env.DB);
+    // 定期清理限流记录
+    pruneRateMaps();
+
+    // 尝试初始化 D1（未绑定时降级）
+    let dbOk = false;
+    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1 init error:', e.message); }
 
     if (!globalThis.__wss) globalThis.__wss = new WSSManager();
     const wss = globalThis.__wss;
     const url = new URL(request.url);
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+
+    // ── 路由：大厅 / 聊天室 ────────────────────
+
+    if (url.pathname === '/' || url.pathname === '') {
+      const html = await env.ASSETS.fetch(new Request(new URL('/lobby.html', request.url)));
+      return html;
+    }
+
+    if (url.pathname === '/chat') {
+      const html = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+      return html;
+    }
 
     // WebSocket 升级
     if (url.pathname.startsWith('/ws/')) {
+      if (!dbOk) return new Response('Database not configured', { status: 500 });
       const segs = decodeURIComponent(url.pathname).replace(/^\//, '').split('/');
       const roomId = (segs.length > 1 && segs[1] && segs[1].length <= 72) ? segs[1] : null;
       const clientHash = (segs.length > 2 && segs[2] && segs[2].length <= 128) ? segs[2] : null;
@@ -217,6 +276,8 @@ export default {
       }
 
       server.addEventListener('message', async (event) => {
+        if (typeof event.data !== 'string') return;
+        if (event.data.length > 65536) return;
         let msg;
         try { msg = JSON.parse(event.data); } catch (_) { return; }
         const { type, data } = msg;
@@ -227,6 +288,7 @@ export default {
 
         // 聊天消息
         if (type === '9007') {
+          if (!checkWsRate(uid)) return;
           if (!data || typeof data.text !== 'string' || !data.text.trim()) return;
           const saved = await addMessage(env.DB, roomId, uid, data.text, nickname);
           wss.broadcastAll(roomId, JSON.stringify({
@@ -307,7 +369,6 @@ export default {
     }
 
     // ── HTTP API ──────────────────────────────
-    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
     // GET /api/rooms
     if (request.method === 'GET' && url.pathname === '/api/rooms') {
@@ -316,16 +377,18 @@ export default {
 
     // POST /api/rooms
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
+      if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
       let b;
       try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
       if (!b.name || !b.deletionPassword) return json({ error: '缺少参数' }, 400);
-      const name = (b.name || '').replace(/[<>"']/g, '').trim().slice(0, 32);
-      const delRaw = (b.deletionPassword || '').replace(/[<>"']/g, '').trim().slice(0, 64);
+      const name = sanitize(b.name, 32);
+      const delRaw = sanitize(b.deletionPassword, 64);
       if (!name || !delRaw) return json({ error: '参数无效' }, 400);
 
       const base = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
       const key = base + '-' + randomKey();
-      const pwd = b.password ? await hmac256((b.password || '').slice(0, 64), key) : '';
+      const rawPwd = sanitize(b.password || '', 64);
+      const pwd = rawPwd ? await hmac256(rawPwd, key) : '';
       const del = await hmac256(delRaw, key);
 
       await env.DB.prepare(
@@ -342,7 +405,7 @@ export default {
       let b;
       try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
       if (!b.deletionPassword) return json({ error: '需要删除密码' }, 400);
-      const delHash = await hmac256((b.deletionPassword || '').slice(0, 64), key);
+      const delHash = await hmac256(sanitize(b.deletionPassword, 64), key);
 
       const room = await env.DB.prepare('SELECT * FROM rooms WHERE room_key = ?1').bind(key).first();
       if (!room || room.deletion_password !== delHash) return json({ success: false }, 403);
@@ -358,6 +421,7 @@ export default {
 
     // POST /api/rooms/:key/clear
     if (request.method === 'POST' && url.pathname.match(/^\/api\/rooms\/[^/]+\/clear$/)) {
+      if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
       const key = decodeURIComponent(url.pathname.split('/api/rooms/')[1].split('/clear')[0]);
       const r = await env.DB.prepare(
         'UPDATE messages SET deleted = 1 WHERE room_key = ?1'
@@ -366,7 +430,7 @@ export default {
       return json({ cleared: r.meta.changes });
     }
 
-    // 静态文件 — 由 Cloudflare Assets 自动处理，这里兜底
-    return new Response('Not Found', { status: 404 });
+    // 静态文件 — 委托给 Cloudflare Assets
+    return env.ASSETS.fetch(request);
   }
 };

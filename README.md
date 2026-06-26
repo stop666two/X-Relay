@@ -43,17 +43,7 @@ npm run start [端口]    # 默认 8081
 
 ## ☁️ 部署到 Cloudflare Workers
 
-点击上方 **Deploy to Cloudflare Workers** 按钮，自动创建 Worker + D1 数据库，全球 CDN 加速，WebSocket 原生支持。
-
-部署后还需在 Cloudflare Dashboard 中绑定 D1：
-```bash
-# 创建 D1 数据库
-wrangler d1 create xrelay-db
-
-# 将返回的 database_id 填入 wrangler.toml
-# 然后重新部署
-wrangler deploy
-```
+点击上方 **Deploy to Cloudflare Workers** 按钮，一键部署 Worker + 静态资源 + D1 数据库（自动创建），全球 CDN 加速，WebSocket 原生支持。点完就能用。
 
 ### 局域网 / VPS 部署（Node.js 版）
 
