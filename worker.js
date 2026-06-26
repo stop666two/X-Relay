@@ -1,18 +1,30 @@
 // ═══════════════════════════════════════════
 //  X-Relay — Cloudflare Worker
 //  WebSocket + HTTP API + D1 持久化
+//  静态文件通过 ES import 内嵌，无需 Assets
 // ═══════════════════════════════════════════
+
+import indexHTML from './www/index.html';
+import chatHTML from './www/chat.html';
+import clientJS from './www/index.js';
+import webrtcJS from './www/xchatuser.js';
+import stylesCSS from './www/style.css';
+
+const STATIC = {
+  '/':              { body: indexHTML,  type: 'text/html; charset=utf-8' },
+  '/chat.html':     { body: chatHTML,   type: 'text/html; charset=utf-8' },
+  '/index.html':    { body: indexHTML,  type: 'text/html; charset=utf-8' },
+  '/index.js':      { body: clientJS,   type: 'application/javascript; charset=utf-8' },
+  '/xchatuser.js':  { body: webrtcJS,   type: 'application/javascript; charset=utf-8' },
+  '/style.css':     { body: stylesCSS,  type: 'text/css; charset=utf-8' },
+};
 
 // ── 安全工具 ────────────────────────────────
 function sanitize(str, max) {
   return String(str || '').replace(/[<>"']/g, '').trim().slice(0, max);
 }
 
-function safeStr(str, max) {
-  return typeof str === 'string' ? str.slice(0, max) : '';
-}
-
-// ── 频率限制 (内存, 同 Node.js 版逻辑) ────────
+// ── 频率限制 ────────────────────────────────
 const apiRate = new Map();
 function checkApiRate(ip) {
   const now = Date.now(), e = apiRate.get(ip) || { count: 0, reset: now + 10000 };
@@ -29,7 +41,6 @@ function checkWsRate(uid) {
   return ++e.count <= 10;
 }
 
-// 定期清理过期限流记录
 function pruneRateMaps() {
   const now = Date.now();
   for (const [k, v] of apiRate) if (now > v.reset + 120000) apiRate.delete(k);
@@ -43,7 +54,7 @@ const SEC_HEADERS = {
   'Referrer-Policy': 'no-referrer'
 };
 
-// ── Crypto (Web Crypto, 同浏览器端一致) ─────
+// ── Crypto ──────────────────────────────────
 async function sha256(s) {
   const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -60,34 +71,23 @@ function randomKey() {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-// ── D1 建表 (batch 方式，D1 不支持 exec) ────
+// ── D1 建表 ────────────────────────────────
 async function ensureSchema(db) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_key TEXT NOT NULL,
-      uid TEXT NOT NULL,
-      text TEXT NOT NULL,
-      nickname TEXT DEFAULT '',
-      ts INTEGER NOT NULL,
-      deleted INTEGER DEFAULT 0
+      room_key TEXT NOT NULL, uid TEXT NOT NULL, text TEXT NOT NULL,
+      nickname TEXT DEFAULT '', ts INTEGER NOT NULL, deleted INTEGER DEFAULT 0
     )`),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts)'),
     db.prepare(`CREATE TABLE IF NOT EXISTS rooms (
-      room_key TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      password TEXT DEFAULT '',
-      deletion_password TEXT NOT NULL,
-      visible INTEGER DEFAULT 1,
-      created_at INTEGER NOT NULL
+      room_key TEXT PRIMARY KEY, name TEXT NOT NULL, password TEXT DEFAULT '',
+      deletion_password TEXT NOT NULL, visible INTEGER DEFAULT 1, created_at INTEGER NOT NULL
     )`),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at)'),
     db.prepare(`CREATE TABLE IF NOT EXISTS nicknames (
-      room_key TEXT NOT NULL,
-      ip TEXT NOT NULL,
-      nickname TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (room_key, ip)
+      room_key TEXT NOT NULL, ip TEXT NOT NULL, nickname TEXT NOT NULL,
+      updated_at INTEGER NOT NULL, PRIMARY KEY (room_key, ip)
     )`)
   ]);
 }
@@ -99,8 +99,6 @@ async function addMessage(db, roomKey, uid, text, nickname) {
     'INSERT INTO messages (room_key, uid, text, nickname, ts) VALUES (?1, ?2, ?3, ?4, ?5)'
   ).bind(roomKey, uid, text, nickname, ts).run();
   const msgId = r.meta.last_row_id;
-
-  // 每 10 条清理一次
   if (msgId % 10 === 0) {
     const { cnt } = await db.prepare(
       'SELECT COUNT(*) as cnt FROM messages WHERE room_key = ?1 AND deleted = 0'
@@ -131,19 +129,14 @@ async function listRooms(db, wss) {
   const r = await db.prepare(
     'SELECT room_key, name, CASE WHEN LENGTH(password) > 0 THEN 1 ELSE 0 END as encrypted, visible, created_at FROM rooms WHERE visible = 1 ORDER BY created_at DESC'
   ).all();
-
   const activity = await db.prepare(
     'SELECT room_key, MAX(ts) as last FROM messages WHERE deleted = 0 GROUP BY room_key'
   ).all();
   const actMap = {};
   activity.results.forEach(a => { actMap[a.room_key] = a.last; });
-
   const rooms = r.results.map(rr => ({
-    id: rr.room_key,
-    name: rr.name,
-    encrypted: !!rr.encrypted,
-    online: wss.roomUsers(rr.room_key).length,
-    lastActivity: actMap[rr.room_key] || 0
+    id: rr.room_key, name: rr.name, encrypted: !!rr.encrypted,
+    online: wss.roomUsers(rr.room_key).length, lastActivity: actMap[rr.room_key] || 0
   }));
   rooms.sort((a, b) => b.online - a.online || b.lastActivity - a.lastActivity);
   return rooms;
@@ -153,190 +146,123 @@ async function getRoom(db, roomKey) {
   return await db.prepare('SELECT * FROM rooms WHERE room_key = ?1').bind(roomKey).first();
 }
 
-// ── WebSocket 连接管理器 ─────────────────────
+// ── WebSocket 管理器 ────────────────────────
 class WSSManager {
-  constructor() {
-    this.rooms = {}; // roomKey → [{id, ws, nickname, device}]
-  }
-
+  rooms = {};
   add(roomKey, id, ws, nickname) {
     if (!this.rooms[roomKey]) this.rooms[roomKey] = [];
     this.rooms[roomKey].push({ id, ws, nickname, device: '' });
   }
-
   remove(roomKey, id) {
     const r = this.rooms[roomKey];
-    if (r) {
-      const i = r.findIndex(u => u.id === id);
-      if (i !== -1) r.splice(i, 1);
-      if (r.length === 0) delete this.rooms[roomKey];
-    }
+    if (r) { const i = r.findIndex(u => u.id === id); if (i !== -1) r.splice(i, 1); if (r.length === 0) delete this.rooms[roomKey]; }
   }
-
-  get(roomKey, uid) {
-    return (this.rooms[roomKey] || []).find(u => u.id === uid);
-  }
-
-  roomUsers(roomKey) {
-    return this.rooms[roomKey] || [];
-  }
-
+  get(roomKey, uid) { return (this.rooms[roomKey] || []).find(u => u.id === uid); }
+  roomUsers(roomKey) { return this.rooms[roomKey] || []; }
   broadcast(roomKey, msg, excludeUid) {
-    (this.rooms[roomKey] || []).forEach(u => {
-      if (u.id !== excludeUid) {
-        try { u.ws.send(msg); } catch (_) {}
-      }
-    });
+    (this.rooms[roomKey] || []).forEach(u => { if (u.id !== excludeUid) try { u.ws.send(msg); } catch (_) {} });
   }
-
   broadcastAll(roomKey, msg) {
-    (this.rooms[roomKey] || []).forEach(u => {
-      try { u.ws.send(msg); } catch (_) {}
-    });
+    (this.rooms[roomKey] || []).forEach(u => { try { u.ws.send(msg); } catch (_) {} });
   }
 }
 
-// ── JSON 响应 ───────────────────────────────
+// ── 响应 ────────────────────────────────────
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...SEC_HEADERS }
-  });
+  return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...SEC_HEADERS } });
 }
 
-async function serveAsset(env, path) {
-  if (!env.ASSETS) {
-    return new Response('Assets not available', { status: 500, headers: SEC_HEADERS });
-  }
-  return env.ASSETS.fetch('https://placeholder' + path);
+function serveStatic(path) {
+  const f = STATIC[path];
+  if (f) return new Response(f.body, { headers: { 'Content-Type': f.type, 'Cache-Control': 'public, max-age=3600', ...SEC_HEADERS } });
+  return null;
 }
 
-// ── 主 Worker ───────────────────────────────
+// ── 主入口 ──────────────────────────────────
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     try {
-    // 定期清理限流记录
     pruneRateMaps();
 
-    // 尝试初始化 D1（未绑定时降级）
     let dbOk = false;
-    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1 init:', e.message); }
+    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1:', e.message); }
 
     if (!globalThis.__wss) globalThis.__wss = new WSSManager();
     const wss = globalThis.__wss;
     const url = new URL(request.url);
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
-    // ── 路由 ──────────────────────────────────
-    // /chat      → chat.html
-    // /api/*     → Worker API
-    // /ws/*      → Worker WebSocket
-    // 其他       → 静态文件(Assets) 或 chat.html(房间)
+    // 静态文件
+    const staticResp = serveStatic(url.pathname);
+    if (staticResp) return staticResp;
 
-    if (url.pathname === '/chat') {
-      return serveAsset(env, '/chat.html');
+    // /chat → chat.html
+    if (url.pathname === '/chat') return serveStatic('/chat.html');
+
+    // 房间路径 → chat.html
+    if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/')) {
+      return serveStatic('/chat.html');
     }
 
-    // WebSocket 升级
+    // WebSocket
     if (url.pathname.startsWith('/ws/')) {
       if (!dbOk) return new Response('Database not configured', { status: 500 });
       const segs = decodeURIComponent(url.pathname).replace(/^\//, '').split('/');
       const roomId = (segs.length > 1 && segs[1] && segs[1].length <= 72) ? segs[1] : null;
       const clientHash = (segs.length > 2 && segs[2] && segs[2].length <= 128) ? segs[2] : null;
-
       if (!roomId || roomId === 'ws') return new Response('Invalid room', { status: 400 });
 
       const dbRoom = await getRoom(env.DB, roomId);
       const needPwd = dbRoom && dbRoom.password;
       const pwdOk = !needPwd || (clientHash && dbRoom.password === clientHash);
-
-      if (needPwd && !pwdOk) {
-        return new Response('Unauthorized', { status: 401 });
-      }
+      if (needPwd && !pwdOk) return new Response('Unauthorized', { status: 401 });
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       server.accept();
 
       const uid = randomKey();
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const nickname = (await env.DB.prepare(
         'SELECT nickname FROM nicknames WHERE room_key = ?1 AND ip = ?2 ORDER BY updated_at DESC LIMIT 1'
       ).bind(roomId, ip).first())?.nickname || '';
-
       wss.add(roomId, uid, server, nickname);
-      const userList = wss.roomUsers(roomId).map(u => ({ id: u.id, nickname: u.nickname, device: u.device }));
 
-      // 发送注册信息
-      server.send(JSON.stringify({
-        type: '1001',
-        data: { id: uid, roomId, roomName: dbRoom?.name || roomId, needPwd, turns: null }
-      }));
-      // 发送在线列表
+      const userList = wss.roomUsers(roomId).map(u => ({ id: u.id, nickname: u.nickname, device: u.device }));
+      server.send(JSON.stringify({ type: '1001', data: { id: uid, roomId, roomName: dbRoom?.name || roomId, needPwd, turns: null } }));
       wss.broadcastAll(roomId, JSON.stringify({ type: '1002', data: userList }));
       server.send(JSON.stringify({ type: '1003', data: { id: uid } }));
-      // 发送历史消息
+
       const history = await getMessages(env.DB, roomId);
-      if (history.length) {
-        server.send(JSON.stringify({ type: '1011', data: history }));
-      }
+      if (history.length) server.send(JSON.stringify({ type: '1011', data: history }));
 
       server.addEventListener('message', async (event) => {
-        if (typeof event.data !== 'string') return;
-        if (event.data.length > 65536) return;
-        let msg;
-        try { msg = JSON.parse(event.data); } catch (_) { return; }
+        if (typeof event.data !== 'string' || event.data.length > 65536) return;
+        let msg; try { msg = JSON.parse(event.data); } catch (_) { return; }
         const { type, data } = msg;
-        if (!type) return;
+        if (!type || type === '9999') return;
 
-        // Keepalive
-        if (type === '9999') return;
-
-        // 聊天消息
         if (type === '9007') {
-          if (!checkWsRate(uid)) return;
-          if (!data || typeof data.text !== 'string' || !data.text.trim()) return;
+          if (!checkWsRate(uid) || !data || typeof data.text !== 'string' || !data.text.trim()) return;
           const saved = await addMessage(env.DB, roomId, uid, data.text, nickname);
-          wss.broadcastAll(roomId, JSON.stringify({
-            type: '1010',
-            data: { uid, text: data.text, msgId: saved.msgId, nickname: saved.nickname, ts: saved.ts }
-          }));
+          wss.broadcastAll(roomId, JSON.stringify({ type: '1010', data: { uid, text: data.text, msgId: saved.msgId, nickname: saved.nickname, ts: saved.ts } }));
           return;
         }
-
-        // 编辑消息
         if (type === '9010') {
           if (!msg.uid || !data?.msgId || typeof data.text !== 'string') return;
-          const r = await env.DB.prepare(
-            'UPDATE messages SET text = ?1 WHERE id = ?2 AND uid = ?3 AND deleted = 0'
-          ).bind(data.text, data.msgId, msg.uid).run();
-          if (r.meta.changes > 0) {
-            wss.broadcastAll(roomId, JSON.stringify({
-              type: '1012', data: { msgId: data.msgId, text: data.text }
-            }));
-          }
+          const r = await env.DB.prepare('UPDATE messages SET text = ?1 WHERE id = ?2 AND uid = ?3 AND deleted = 0').bind(data.text, data.msgId, msg.uid).run();
+          if (r.meta.changes > 0) wss.broadcastAll(roomId, JSON.stringify({ type: '1012', data: { msgId: data.msgId, text: data.text } }));
           return;
         }
-
-        // 删除消息
         if (type === '9011') {
           if (!msg.uid || !data?.msgId) return;
-          const r = await env.DB.prepare(
-            'UPDATE messages SET deleted = 1 WHERE id = ?1 AND uid = ?2'
-          ).bind(data.msgId, msg.uid).run();
-          if (r.meta.changes > 0) {
-            wss.broadcastAll(roomId, JSON.stringify({
-              type: '1013', data: { msgId: data.msgId }
-            }));
-          }
+          const r = await env.DB.prepare('UPDATE messages SET deleted = 1 WHERE id = ?1 AND uid = ?2').bind(data.msgId, msg.uid).run();
+          if (r.meta.changes > 0) wss.broadcastAll(roomId, JSON.stringify({ type: '1013', data: { msgId: data.msgId } }));
           return;
         }
 
-        // WebRTC 信令 / 昵称 / 设备 / 输入状态
         const suid = msg.uid, targetId = msg.targetId;
         if (!suid || !targetId) return;
-        const me = wss.get(roomId, suid);
-        if (!me) return;
+        const me = wss.get(roomId, suid); if (!me) return;
         const target = wss.get(roomId, targetId);
 
         if (type === '9001' && target) target.ws.send(JSON.stringify({ type: '1004', data: { targetId: suid, candidate: data?.candidate } }));
@@ -344,19 +270,10 @@ export default {
         else if (type === '9003' && target) target.ws.send(JSON.stringify({ type: '1006', data: { targetId: suid, answer: data?.targetAddr } }));
         else if (type === '9004') {
           const nn = (data?.nickname || '').slice(0, 20);
-          if (nn) {
-            me.nickname = nn;
-            await env.DB.prepare(
-              'INSERT OR REPLACE INTO nicknames (room_key, ip, nickname, updated_at) VALUES (?1, ?2, ?3, ?4)'
-            ).bind(roomId, ip, nn, Date.now()).run();
-            wss.broadcast(roomId, JSON.stringify({ type: '1007', data: { id: suid, nickname: nn } }), suid);
-          }
+          if (nn) { me.nickname = nn; await env.DB.prepare('INSERT OR REPLACE INTO nicknames (room_key, ip, nickname, updated_at) VALUES (?1, ?2, ?3, ?4)').bind(roomId, ip, nn, Date.now()).run(); wss.broadcast(roomId, JSON.stringify({ type: '1007', data: { id: suid, nickname: nn } }), suid); }
         }
         else if (type === '9005') {
-          if (data?.device && data.device.length <= 100) {
-            me.device = data.device;
-            wss.broadcast(roomId, JSON.stringify({ type: '1008', data: { id: suid, device: data.device } }), suid);
-          }
+          if (data?.device && data.device.length <= 100) { me.device = data.device; wss.broadcast(roomId, JSON.stringify({ type: '1008', data: { id: suid, device: data.device } }), suid); }
         }
         else if (type === '9006') {
           wss.broadcast(roomId, JSON.stringify({ type: '1009', data: { id: suid, typing: data?.typing } }), suid);
@@ -365,85 +282,60 @@ export default {
 
       server.addEventListener('close', () => {
         wss.remove(roomId, uid);
-        wss.broadcastAll(roomId, JSON.stringify({
-          type: '1002',
-          data: wss.roomUsers(roomId).map(u => ({ id: u.id, nickname: u.nickname, device: u.device }))
-        }));
+        wss.broadcastAll(roomId, JSON.stringify({ type: '1002', data: wss.roomUsers(roomId).map(u => ({ id: u.id, nickname: u.nickname, device: u.device })) }));
       });
 
       return new Response(null, { status: 101, webSocket: client });
     }
 
     // ── HTTP API ──────────────────────────────
-
-    // GET /api/rooms
     if (request.method === 'GET' && url.pathname === '/api/rooms') {
       if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       return json(await listRooms(env.DB, wss));
     }
 
-    // POST /api/rooms
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
       if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
-      let b;
-      try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
+      let b; try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
       if (!b.name || !b.deletionPassword) return json({ error: '缺少参数' }, 400);
       const name = sanitize(b.name, 32);
       const delRaw = sanitize(b.deletionPassword, 64);
       if (!name || !delRaw) return json({ error: '参数无效' }, 400);
-
       const base = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
       const key = base + '-' + randomKey();
       const rawPwd = sanitize(b.password || '', 64);
       const pwd = rawPwd ? await hmac256(rawPwd, key) : '';
       const del = await hmac256(delRaw, key);
-
-      await env.DB.prepare(
-        'INSERT INTO rooms (room_key, name, password, deletion_password, visible, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
-      ).bind(key, name, pwd, del, b.visibleInLobby !== false ? 1 : 0, Date.now()).run();
-
+      await env.DB.prepare('INSERT INTO rooms (room_key, name, password, deletion_password, visible, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)').bind(key, name, pwd, del, b.visibleInLobby !== false ? 1 : 0, Date.now()).run();
       return json({ roomKey: key, name, hasPassword: !!pwd }, 201);
     }
 
-    // DELETE /api/rooms/:key
     if (request.method === 'DELETE' && url.pathname.startsWith('/api/rooms/')) {
       if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       const key = decodeURIComponent(url.pathname.split('/api/rooms/')[1]);
       if (!key || key.length > 72) return json({ error: '无效房间' }, 400);
-      let b;
-      try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
+      let b; try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
       if (!b.deletionPassword) return json({ error: '需要删除密码' }, 400);
       const delHash = await hmac256(sanitize(b.deletionPassword, 64), key);
-
       const room = await env.DB.prepare('SELECT * FROM rooms WHERE room_key = ?1').bind(key).first();
       if (!room || room.deletion_password !== delHash) return json({ success: false }, 403);
-
       await env.DB.prepare('DELETE FROM messages WHERE room_key = ?1').bind(key).run();
       await env.DB.prepare('DELETE FROM rooms WHERE room_key = ?1').bind(key).run();
-
-      // 断开房间内所有 WebSocket
       wss.roomUsers(key).forEach(u => { try { u.ws.close(); } catch (_) {} });
-
       return json({ success: true });
     }
 
-    // POST /api/rooms/:key/clear
     if (request.method === 'POST' && url.pathname.match(/^\/api\/rooms\/[^/]+\/clear$/)) {
       if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
       const key = decodeURIComponent(url.pathname.split('/api/rooms/')[1].split('/clear')[0]);
-      const r = await env.DB.prepare(
-        'UPDATE messages SET deleted = 1 WHERE room_key = ?1'
-      ).bind(key).run();
+      const r = await env.DB.prepare('UPDATE messages SET deleted = 1 WHERE room_key = ?1').bind(key).run();
       wss.broadcastAll(key, JSON.stringify({ type: '1014', data: {} }));
       return json({ cleared: r.meta.changes });
     }
 
-    // 静态文件 / 房间路径 — Assets 处理，不存在则 chat.html
-    const assetResp = await serveAsset(env, url.pathname);
-    if (assetResp.status >= 400) return serveAsset(env, '/chat.html');
-    return assetResp;
+    return new Response('Not Found', { status: 404, headers: SEC_HEADERS });
 
     } catch (e) {
       console.error('Worker error:', e.message, e.stack);

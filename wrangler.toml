@@ -1,14 +1,10 @@
 # X-Relay — Cloudflare Worker
 # 点击 README 中的 Deploy 按钮一键部署
-# D1 数据库由 Cloudflare 自动创建
+# 静态文件通过 ES import 内嵌，D1 自动创建
 
 name = "x-relay"
 main = "worker.js"
 compatibility_date = "2025-06-26"
-
-# 静态资源
-[assets]
-directory = "./www"
 
 # D1 数据库（不指定 id，Cloudflare 自动创建）
 [[d1_databases]]
