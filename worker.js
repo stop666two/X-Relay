@@ -204,11 +204,11 @@ function json(data, status = 200) {
   });
 }
 
-function serveAsset(env, path) {
+async function serveAsset(env, path) {
   if (!env.ASSETS) {
     return new Response('Assets not available', { status: 500, headers: SEC_HEADERS });
   }
-  return env.ASSETS.fetch(new Request('https://x-relay' + path));
+  return env.ASSETS.fetch('https://placeholder' + path);
 }
 
 // ── 主 Worker ───────────────────────────────
@@ -441,10 +441,9 @@ export default {
     }
 
     // 静态文件 / 房间路径 — Assets 处理，不存在则 chat.html
-    return serveAsset(env, url.pathname).then(r => {
-      if (r.status >= 400) return serveAsset(env, '/chat.html');
-      return r;
-    });
+    const assetResp = await serveAsset(env, url.pathname);
+    if (assetResp.status >= 400) return serveAsset(env, '/chat.html');
+    return assetResp;
 
     } catch (e) {
       console.error('Worker error:', e.message, e.stack);
