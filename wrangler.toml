@@ -1,0 +1,9 @@
+# X-Relay — Cloudflare Pages 部署配置
+# 用于通过 Cloudflare Pages 部署静态前端
+# 点击 README 中的「Deploy to Cloudflare Pages」按钮即可一键部署
+
+name = "x-relay"
+compatibility_date = "2025-06-26"
+
+[site]
+bucket = "./www"

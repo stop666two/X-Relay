@@ -1,0 +1,35 @@
+{
+  "name": "x-relay",
+  "version": "0.1.0",
+  "description": "基于 WebRTC 的局域网 P2P 文字/文件传输工具，支持端到端加密",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "X-Relay",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "ws": "^8.18.0"
+  },
+  "bin": "./index.js",
+  "pkg": {
+    "assets": [
+      "!room_pwd.json",
+      "./node_modules/**/*",
+      "./www/**/*"
+    ],
+    "ignore": [
+      "./room_pwd.json"
+    ],
+    "targets": [
+      "node18-linux-x64",
+      "node18-win-x64",
+      "node18-macos-x64"
+    ],
+    "outputPath": "dist"
+  }
+}
