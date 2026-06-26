@@ -60,10 +60,10 @@ function randomKey() {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-// ── D1 查询 (首次访问自动建表) ──────────────
+// ── D1 建表 (batch 方式，D1 不支持 exec) ────
 async function ensureSchema(db) {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS messages (
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       room_key TEXT NOT NULL,
       uid TEXT NOT NULL,
@@ -71,25 +71,25 @@ async function ensureSchema(db) {
       nickname TEXT DEFAULT '',
       ts INTEGER NOT NULL,
       deleted INTEGER DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts);
-    CREATE TABLE IF NOT EXISTS rooms (
+    )`),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts)'),
+    db.prepare(`CREATE TABLE IF NOT EXISTS rooms (
       room_key TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       password TEXT DEFAULT '',
       deletion_password TEXT NOT NULL,
       visible INTEGER DEFAULT 1,
       created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at);
-    CREATE TABLE IF NOT EXISTS nicknames (
+    )`),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at)'),
+    db.prepare(`CREATE TABLE IF NOT EXISTS nicknames (
       room_key TEXT NOT NULL,
       ip TEXT NOT NULL,
       nickname TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (room_key, ip)
-    );
-  `);
+    )`)
+  ]);
 }
 
 // ── 消息 ────────────────────────────────────
@@ -380,11 +380,13 @@ export default {
 
     // GET /api/rooms
     if (request.method === 'GET' && url.pathname === '/api/rooms') {
+      if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       return json(await listRooms(env.DB, wss));
     }
 
     // POST /api/rooms
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
+      if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
       let b;
       try { b = await request.json(); } catch (_) { return json({ error: '无效请求' }, 400); }
@@ -408,6 +410,7 @@ export default {
 
     // DELETE /api/rooms/:key
     if (request.method === 'DELETE' && url.pathname.startsWith('/api/rooms/')) {
+      if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       const key = decodeURIComponent(url.pathname.split('/api/rooms/')[1]);
       if (!key || key.length > 72) return json({ error: '无效房间' }, 400);
       let b;
@@ -429,6 +432,7 @@ export default {
 
     // POST /api/rooms/:key/clear
     if (request.method === 'POST' && url.pathname.match(/^\/api\/rooms\/[^/]+\/clear$/)) {
+      if (!dbOk) return json({ error: '数据库未就绪' }, 503);
       if (!checkApiRate(ip)) return json({ error: '请求过于频繁' }, 429);
       const key = decodeURIComponent(url.pathname.split('/api/rooms/')[1].split('/clear')[0]);
       const r = await env.DB.prepare(
