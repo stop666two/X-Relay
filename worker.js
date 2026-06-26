@@ -315,13 +315,25 @@ function randomKey() {
 
 // ── D1 ─────────────────────────────────────
 async function ensureSchema(db) {
-  await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room_key TEXT NOT NULL, uid TEXT NOT NULL, text TEXT NOT NULL, nickname TEXT DEFAULT '', ts INTEGER NOT NULL, deleted INTEGER DEFAULT 0)"),
-    db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts)'),
-    db.prepare("CREATE TABLE IF NOT EXISTS rooms (room_key TEXT PRIMARY KEY, name TEXT NOT NULL, password TEXT DEFAULT '', deletion_password TEXT NOT NULL, visible INTEGER DEFAULT 1, created_at INTEGER NOT NULL)"),
-    db.prepare('CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at)'),
-    db.prepare("CREATE TABLE IF NOT EXISTS nicknames (room_key TEXT NOT NULL, ip TEXT NOT NULL, nickname TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (room_key, ip))")
-  ]);
+  try {
+    await db.batch([
+      db.prepare("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room_key TEXT NOT NULL, uid TEXT NOT NULL, text TEXT NOT NULL, nickname TEXT DEFAULT '', ts INTEGER NOT NULL, deleted INTEGER DEFAULT 0)"),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts)'),
+      db.prepare("CREATE TABLE IF NOT EXISTS rooms (room_key TEXT PRIMARY KEY, name TEXT NOT NULL, password TEXT DEFAULT '', deletion_password TEXT NOT NULL, visible INTEGER DEFAULT 1, created_at INTEGER NOT NULL)"),
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at)'),
+      db.prepare("CREATE TABLE IF NOT EXISTS nicknames (room_key TEXT NOT NULL, ip TEXT NOT NULL, nickname TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (room_key, ip))")
+    ]);
+  } catch (_) {
+    // batch 失败则逐条执行
+    const stmts = [
+      "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, room_key TEXT NOT NULL, uid TEXT NOT NULL, text TEXT NOT NULL, nickname TEXT DEFAULT '', ts INTEGER NOT NULL, deleted INTEGER DEFAULT 0)",
+      'CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_key, ts)',
+      "CREATE TABLE IF NOT EXISTS rooms (room_key TEXT PRIMARY KEY, name TEXT NOT NULL, password TEXT DEFAULT '', deletion_password TEXT NOT NULL, visible INTEGER DEFAULT 1, created_at INTEGER NOT NULL)",
+      'CREATE INDEX IF NOT EXISTS idx_rooms_visible ON rooms(visible, created_at)',
+      "CREATE TABLE IF NOT EXISTS nicknames (room_key TEXT NOT NULL, ip TEXT NOT NULL, nickname TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (room_key, ip))"
+    ];
+    for (const s of stmts) await db.prepare(s).run();
+  }
 }
 
 async function addMessage(db, roomKey, uid, text, nickname) {
@@ -383,8 +395,11 @@ export default {
     try {
     pruneRateMaps();
 
-    let dbOk = false;
-    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1:', e.message); }
+    let dbOk = globalThis.__dbOk || false;
+    if (!globalThis.__dbInited) {
+      globalThis.__dbInited = true;
+      try { await ensureSchema(env.DB); dbOk = true; globalThis.__dbOk = true; } catch (e) { console.error('D1:', e.message); }
+    }
 
     if (!globalThis.__wss) globalThis.__wss = new WSSManager();
     const wss = globalThis.__wss;
