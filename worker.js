@@ -438,14 +438,18 @@ export default {
 
     // ── WebSocket ────────────────────────────
     if (url.pathname.startsWith('/ws/')) {
-      if (!dbOk) return new Response('Database not configured', { status: 500 });
       const segs = decodeURIComponent(url.pathname).replace(/^\//, '').split('/');
       const roomId = (segs.length > 1 && segs[1] && segs[1].length <= 72) ? segs[1] : null;
       const clientHash = (segs.length > 2 && segs[2] && segs[2].length <= 128) ? segs[2] : null;
       if (!roomId || roomId === 'ws') return new Response('Invalid room', { status: 400 });
 
-      const dbRoom = await getRoom(env.DB, roomId);
-      const needPwd = dbRoom && dbRoom.password;
+      let dbRoom = null, needPwd = false;
+      if (dbOk) {
+        try {
+          dbRoom = await getRoom(env.DB, roomId);
+          needPwd = dbRoom && dbRoom.password;
+        } catch (e) { console.error('getRoom:', e.message); }
+      }
       if (needPwd && (!clientHash || dbRoom.password !== clientHash)) return new Response('Unauthorized', { status: 401 });
 
       const pair = new WebSocketPair();
@@ -453,14 +457,14 @@ export default {
       server.accept();
 
       const uid = randomKey();
-      const nickname = (await env.DB.prepare('SELECT nickname FROM nicknames WHERE room_key = ?1 AND ip = ?2 ORDER BY updated_at DESC LIMIT 1').bind(roomId, ip).first())?.nickname || '';
+      let nickname = '';
+      if (dbOk) { try { const row = await env.DB.prepare('SELECT nickname FROM nicknames WHERE room_key = ?1 AND ip = ?2 ORDER BY updated_at DESC LIMIT 1').bind(roomId, ip).first(); nickname = row?.nickname || ''; } catch (_) {} }
       wss.add(roomId, uid, server, nickname);
 
       server.send(JSON.stringify({ type:'1001', data:{ id:uid, roomId, roomName:dbRoom?.name||roomId, needPwd, turns:null } }));
       wss.broadcastAll(roomId, JSON.stringify({ type:'1002', data: wss.roomUsers(roomId).map(u=>({id:u.id,nickname:u.nickname,device:u.device})) }));
       server.send(JSON.stringify({ type:'1003', data:{ id:uid } }));
-      const history = await getMessages(env.DB, roomId);
-      if (history.length) server.send(JSON.stringify({ type:'1011', data:history }));
+      if (dbOk) { try { const history = await getMessages(env.DB, roomId); if (history.length) server.send(JSON.stringify({ type:'1011', data:history })); } catch (_) {} }
 
       server.addEventListener('message', async (event) => {
         if (typeof event.data !== 'string' || event.data.length > 65536) return;
@@ -470,16 +474,17 @@ export default {
 
         if (type === '9007') {
           if (!checkWsRate(uid) || !data?.text?.trim) return;
-          const saved = await addMessage(env.DB, roomId, uid, data.text, nickname);
+          let saved = { uid, msgId: Date.now(), text: data.text, nickname, ts: Date.now() };
+          if (dbOk) { try { saved = await addMessage(env.DB, roomId, uid, data.text, nickname); } catch (_) {} }
           wss.broadcastAll(roomId, JSON.stringify({ type:'1010', data:{ uid, text:data.text, msgId:saved.msgId, nickname:saved.nickname, ts:saved.ts } }));
         } else if (type === '9010') {
           if (!msg.uid || !data?.msgId || !data?.text) return;
-          const r = await env.DB.prepare('UPDATE messages SET text=?1 WHERE id=?2 AND uid=?3 AND deleted=0').bind(data.text, data.msgId, msg.uid).run();
-          if (r.meta.changes>0) wss.broadcastAll(roomId, JSON.stringify({ type:'1012', data:{ msgId:data.msgId, text:data.text } }));
+          if (dbOk) { try { await env.DB.prepare('UPDATE messages SET text=?1 WHERE id=?2 AND uid=?3 AND deleted=0').bind(data.text, data.msgId, msg.uid).run(); } catch (_) {} }
+          wss.broadcastAll(roomId, JSON.stringify({ type:'1012', data:{ msgId:data.msgId, text:data.text } }));
         } else if (type === '9011') {
           if (!msg.uid || !data?.msgId) return;
-          const r = await env.DB.prepare('UPDATE messages SET deleted=1 WHERE id=?1 AND uid=?2').bind(data.msgId, msg.uid).run();
-          if (r.meta.changes>0) wss.broadcastAll(roomId, JSON.stringify({ type:'1013', data:{ msgId:data.msgId } }));
+          if (dbOk) { try { await env.DB.prepare('UPDATE messages SET deleted=1 WHERE id=?1 AND uid=?2').bind(data.msgId, msg.uid).run(); } catch (_) {} }
+          wss.broadcastAll(roomId, JSON.stringify({ type:'1013', data:{ msgId:data.msgId } }));
         } else {
           const suid = msg.uid, targetId = msg.targetId;
           if (!suid || !targetId) return;
