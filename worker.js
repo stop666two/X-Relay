@@ -219,16 +219,24 @@ export default {
     const url = new URL(request.url);
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
-    // ── 路由：大厅 / 聊天室 ────────────────────
-
-    if (url.pathname === '/' || url.pathname === '') {
-      const html = await env.ASSETS.fetch(new Request(new URL('/lobby.html', request.url)));
-      return html;
-    }
+    // ── 路由 ──────────────────────────────────
+    // /          → index.html (大厅, Assets 自动)
+    // /chat      → chat.html (公共频道)
+    // /<roomKey> → chat.html (非静态文件 → 聊天室)
+    // /api/*     → Worker API
+    // /ws/*      → Worker WebSocket
 
     if (url.pathname === '/chat') {
-      const html = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
-      return html;
+      return env.ASSETS.fetch(new Request(new URL('/chat.html', request.url)));
+    }
+
+    // 房间路径: 非资源文件 → chat.html
+    if (url.pathname.length > 1 && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/') && !url.pathname.startsWith('/favicon')) {
+      const assetCheck = await env.ASSETS.fetch(new Request(new URL(url.pathname, request.url)));
+      if (assetCheck.status >= 400) {
+        return env.ASSETS.fetch(new Request(new URL('/chat.html', request.url)));
+      }
+      return assetCheck;
     }
 
     // WebSocket 升级

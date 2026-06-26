@@ -1,139 +1,266 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>X-Relay</title>
-  <script src="./xchatuser.js?v=31"></script>
-  <link rel="stylesheet" href="./style.css?v=31">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X-Relay · 大厅</title>
+  <style>
+    :root { --bg:#0f172a; --bg2:#1a2332; --bg3:#243044; --fg:#e2e8f0; --fg2:#94a3b8; --fg3:#64748b; --accent:#14b8a6; --accent2:#0d9488; --border:#334155; --red:#ef4444; --green:#22c55e; --amber:#f59e0b; --radius:10px; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--fg); font:14px "SF Mono","Cascadia Code","JetBrains Mono",Consolas,"Microsoft YaHei",sans-serif; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:40px 16px 80px; }
+    .lobby { max-width:640px; width:100%; }
+    .lobby h1 { font-size:28px; color:var(--accent); text-align:center; margin-bottom:6px; }
+    .lobby .sub { text-align:center; color:var(--fg3); margin-bottom:24px; font-size:13px; }
+    .toolbar { display:flex; gap:8px; margin-bottom:20px; justify-content:center; }
+    .toolbar button { background:var(--bg2); color:var(--accent); border:1px solid var(--border); padding:8px 18px; border-radius:8px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; transition:all .15s; }
+    .toolbar button:hover { background:var(--bg3); border-color:var(--accent); }
+    .toolbar button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .room-list { display:flex; flex-direction:column; gap:8px; }
+    .room-card { display:flex; align-items:center; gap:12px; padding:14px 18px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; transition:all .15s; text-decoration:none; color:inherit; }
+    .room-card:hover { border-color:var(--accent); background:var(--bg3); }
+    .room-card .icon { font-size:20px; flex-shrink:0; }
+    .room-card .info { flex:1; min-width:0; }
+    .room-card .name { font-size:15px; font-weight:600; }
+    .room-card .meta { font-size:12px; color:var(--fg2); margin-top:2px; }
+    .room-card .badge { padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; flex-shrink:0; }
+    .badge.on { background:var(--green); color:#fff; }
+    .badge.off { background:var(--fg3); color:#fff; }
+    .room-card .actions { display:flex; gap:4px; flex-shrink:0; }
+    .room-card .btn-copy,.room-card .btn-delete { background:none; border:none; cursor:pointer; font-size:14px; padding:4px 6px; border-radius:4px; opacity:.6; transition:all .15s; }
+    .room-card .btn-copy:hover { opacity:1; background:var(--bg3); }
+    .room-card .btn-delete:hover { opacity:1; background:var(--bg3); color:var(--red); }
+    .empty { text-align:center; padding:40px; color:var(--fg3); }
+    .empty svg { width:48px; height:48px; margin-bottom:12px; opacity:.3; }
+    .public-room { margin-top:16px; padding:14px 18px; background:var(--bg2); border:1px dashed var(--border); border-radius:var(--radius); text-align:center; }
+    .public-room a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .public-room a:hover { text-decoration:underline; }
+    .footer-links { text-align:center; margin-top:24px; font-size:12px; color:var(--fg3); }
+    .footer-links a { color:var(--accent); text-decoration:none; margin:0 8px; }
+    .footer-links a:hover { text-decoration:underline; }
+    .toast { position:fixed; top:16px; right:16px; background:var(--accent); color:#fff; padding:8px 18px; border-radius:6px; font-size:13px; z-index:9999; opacity:0; transform:translateY(-8px); transition:all .2s; pointer-events:none; }
+    .toast.on { opacity:1; transform:translateY(0); }
+    /* Dialog */
+    .dialog-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000; display:none; align-items:center; justify-content:center; }
+    .dialog-overlay.show { display:flex; }
+    .dialog { background:var(--bg2); border-radius:var(--radius); padding:24px; width:400px; max-width:92vw; border:1px solid var(--border); }
+    .dialog h3 { font-size:18px; margin-bottom:16px; color:var(--accent); }
+    .dialog label { display:block; font-size:12px; color:var(--fg2); margin-bottom:4px; margin-top:12px; }
+    .dialog label:first-of-type { margin-top:0; }
+    .dialog input[type="text"],.dialog input[type="password"] { width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; font-size:14px; outline:none; }
+    .dialog input:focus { border-color:var(--accent); }
+    .dialog .hint { font-size:11px; color:var(--fg3); margin-top:2px; }
+    .dialog .checkbox-row { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; cursor:pointer; }
+    .dialog .checkbox-row input { accent-color:var(--accent); }
+    .dialog .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+    .dialog .actions button { padding:8px 20px; border-radius:6px; border:1px solid var(--border); cursor:pointer; font:inherit; font-size:13px; font-weight:600; }
+    .dialog .btn-cancel { background:var(--bg); color:var(--fg); }
+    .dialog .btn-submit { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .dialog .btn-danger { background:var(--red); color:#fff; border-color:var(--red); }
+    .share-box { display:flex; gap:8px; margin-top:8px; }
+    .share-box input { flex:1; }
+    .share-box button { background:var(--accent); color:#fff; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; white-space:nowrap; }
+  </style>
 </head>
 <body>
-  <div class="snackbar" id="snackbar"><span id="snackMsg"></span><span class="snackbar-action" id="snackAction"></span></div>
-
-  <main class="main" id="main">
-    <header class="room-header">
-      <span class="room-name" id="roomName">X-Relay</span>
-      <span class="room-meta" id="roomMeta"></span>
-      <a class="btn-icon" id="btnHome" href="/" title="返回大厅"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></a>
-      <button class="btn-icon" id="btnShare" title="分享房间" style="display:none"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg></button>
-      <button class="btn-icon" id="btnDeleteRoom" title="删除房间" style="display:none"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
-      <button class="btn-icon" id="btnSearch" title="搜索 (Ctrl+K)"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></button>
-      <button class="btn-icon" id="btnSound" title="消息提示音"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4a2 2 0 002 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg></button>
-    </header>
-
-    <div class="msgs" id="msgs"></div>
-    <button class="scroll-fab" id="scrollFab" title="回到底部"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg><span class="badge" id="unreadBadge" style="display:none">0</span></button>
-
-    <div class="typing-bar" id="typingBar"></div>
-
-    <div class="input-area">
-      <div class="input-row">
-        <button class="btn-icon" id="btnFile" title="发送文件"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg></button>
-        <textarea id="msgInput" rows="1" placeholder="输入消息… (Enter 发送, Shift+Enter 换行)"></textarea>
-        <button class="btn-icon" id="btnSend" title="发送"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg></button>
-      </div>
+  <div class="toast" id="toast"></div>
+  <div class="lobby">
+    <h1>X-Relay</h1>
+    <p class="sub">局域网 P2P 文字/文件传输</p>
+    <div class="toolbar">
+      <button onclick="loadRooms()">🔄 刷新</button>
+      <button class="primary" onclick="showCreateDlg()">＋ 创建房间</button>
     </div>
-  </main>
-
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <span class="sidebar-title" id="sidebarTitle">在线</span>
-      <div>
-        <button class="btn-icon" id="btnTheme" title="主题"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 01-4.4 2.26 5.4 5.4 0 01-5.4-5.4c0-1.81.89-3.42 2.26-4.4A9 9 0 0012 3z"/></svg></button>
-        <button class="btn-icon" id="btnNick" title="昵称"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 4a4 4 0 014 4 4 4 0 01-4 4 4 4 0 01-4-4 4 4 0 014-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4z"/></svg></button>
-        <button class="btn-icon" id="btnClear" title="清屏"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4zM6 7v12a2 2 0 002 2h8a2 2 0 002-2V7H6z"/></svg></button>
-        <button class="btn-icon" id="btnExport" title="导出聊天"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button>
-        <button class="btn-icon" id="btnClearMsgs" title="清空聊天记录" style="display:none"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
-      </div>
+    <div class="room-list" id="roomList"></div>
+    <div class="public-room">
+      或直接进入 <a href="/chat">公共频道</a>（无需密码）
     </div>
-    <ul class="sidebar-list" id="userList"></ul>
-  </aside>
-
-  <div class="mobile-nav">
-    <button class="btn-icon" id="btnUsersMob"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.03-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></button>
-    <button class="btn-icon" id="btnFileMob"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg></button>
-    <button class="btn-icon" id="btnRoom"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg></button>
-    <button class="btn-icon" id="btnExportMob"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button>
-  </div>
-  <div class="mobile-backdrop" id="mobileBackdrop"></div>
-
-  <menu class="ctx-menu" id="ctxMenu"></menu>
-
-  <!-- File send dialog -->
-  <div class="dialog-overlay" id="sendDlg">
-    <div class="dialog" style="min-width:380px">
-      <h3>发送文件</h3>
-      <div id="fileBatchInfo" style="margin-bottom:12px;font-size:13px;color:var(--md-sys-color-on-surface-variant)"></div>
-      <div id="sendUserList" style="max-height:240px;overflow-y:auto"></div>
-      <div class="progress-wrap" id="sendProgress" style="display:none">
-        <div class="progress-label" id="progLabel"></div>
-        <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
-        <button class="btn-text" id="btnCancelXfer" style="margin-top:8px;color:var(--md-sys-color-error)">取消传输</button>
-      </div>
-      <div class="dialog-actions">
-        <button class="btn-text" id="btnCancelSend">取消</button>
-        <button class="btn-filled" id="btnConfirmSend">发送</button>
-      </div>
+    <div class="footer-links">
+      <a href="https://github.com/stop666two/X-Relay" target="_blank" rel="noopener noreferrer">⭐ GitHub</a>
     </div>
   </div>
 
-  <!-- Nickname dialog -->
-  <div class="dialog-overlay" id="nickDlg">
+  <!-- Create room dialog -->
+  <div class="dialog-overlay" id="createDlg">
     <div class="dialog">
-      <h3>设置昵称</h3>
-      <input type="text" id="nickInput" maxlength="20" placeholder="你的昵称" autocomplete="off">
-      <div class="dialog-actions">
-        <button class="btn-text" id="btnCancelNick">取消</button>
-        <button class="btn-filled" id="btnSaveNick">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Password dialog -->
-  <div class="dialog-overlay" id="pwdDlg">
-    <div class="dialog">
-      <h3>房间密码</h3>
-      <input type="password" id="pwdInput" placeholder="输入密码" autocomplete="off">
-      <div class="dialog-actions">
-        <button class="btn-filled" id="btnSubmitPwd">进入</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Search bar -->
-  <div class="dialog-overlay" id="searchDlg" style="align-items:flex-start;padding-top:80px">
-    <div class="dialog" style="width:500px">
-      <input type="text" id="searchInput" placeholder="搜索消息… (Esc 关闭, ↑↓ 导航)" autocomplete="off" style="margin-bottom:0">
-      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:4px" id="searchCount"></div>
-    </div>
-  </div>
-
-  <!-- Room manage dialog (share + delete) -->
-  <div class="dialog-overlay" id="roomManageDlg">
-    <div class="dialog">
-      <h3>房间管理</h3>
-      <label>分享链接</label>
-      <div class="share-link-row"><input type="text" id="roomShareLink" readonly><button class="btn-filled" onclick="copyRoomLink()">复制</button></div>
-      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:4px" id="roomShareHint"></div>
-      <div class="dialog-actions" style="justify-content:space-between">
-        <button class="btn-text" style="color:var(--md-sys-color-error)" onclick="hideDlg('roomManageDlg');showDeleteRoomDlg()">🗑️ 删除房间</button>
-        <button class="btn-text" onclick="hideDlg('roomManageDlg')">关闭</button>
+      <h3>创建新房间</h3>
+      <label>房间名称 *</label>
+      <input type="text" id="roomName" maxlength="32" placeholder="给房间取个名字" autocomplete="off">
+      <label>房间密码（可选）</label>
+      <input type="password" id="roomPwd" placeholder="留空则不加密" autocomplete="off">
+      <div class="hint">设置密码后，进入房间需输入密码，消息内容端到端加密</div>
+      <label>删除密码 *</label>
+      <input type="password" id="delPwd" placeholder="用于完全删除此房间" autocomplete="off">
+      <div class="hint">分享此密码给管理员即可删除房间所有数据</div>
+      <div class="checkbox-row"><input type="checkbox" id="roomVisible" checked> <span>在房间大厅中展示</span></div>
+      <div class="actions">
+        <button class="btn-cancel" onclick="hideCreateDlg()">取消</button>
+        <button class="btn-submit" onclick="doCreate()">创建</button>
       </div>
     </div>
   </div>
 
   <!-- Delete room dialog -->
-  <div class="dialog-overlay" id="deleteRoomDlg">
+  <div class="dialog-overlay" id="deleteDlg">
     <div class="dialog">
       <h3>删除房间</h3>
-      <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant);margin-bottom:12px">⚠️ 此操作不可逆，将删除房间内所有消息数据</p>
-      <input type="password" id="delRoomPwdInput" placeholder="输入此房间的删除密码" autocomplete="off">
-      <div class="dialog-actions">
-        <button class="btn-text" onclick="hideDlg('deleteRoomDlg')">取消</button>
-        <button class="btn-filled" style="background:var(--md-sys-color-error);color:#fff" onclick="doDeleteRoom()">确认删除</button>
+      <p style="font-size:13px;color:var(--fg2);margin-bottom:12px">正在删除: <strong id="delRoomName" style="color:var(--fg)"></strong></p>
+      <p style="font-size:12px;color:var(--amber);margin-bottom:12px">⚠️ 此操作不可逆，将删除房间内所有消息数据</p>
+      <label>删除密码</label>
+      <input type="password" id="delPwdInput" placeholder="输入此房间的删除密码" autocomplete="off">
+      <div class="actions">
+        <button class="btn-cancel" onclick="hideDeleteDlg()">取消</button>
+        <button class="btn-danger" onclick="doDelete()">确认删除</button>
       </div>
     </div>
   </div>
 
-  <script src="./index.js?v=31"></script>
+  <!-- Share dialog -->
+  <div class="dialog-overlay" id="shareDlg">
+    <div class="dialog">
+      <h3>分享房间链接</h3>
+      <label>链接</label>
+      <div class="share-box"><input type="text" id="shareLink" readonly><button onclick="copyShare()">复制</button></div>
+      <div class="hint" id="shareHint"></div>
+      <div class="actions"><button class="btn-submit" onclick="hideShareDlg()">关闭</button></div>
+    </div>
+  </div>
+
+  <script>
+    let _currentDelRoom = null;
+
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('on');
+      setTimeout(() => t.classList.remove('on'), 2000);
+    }
+
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    async function loadRooms() {
+      const list = document.getElementById('roomList');
+      list.innerHTML = '<div class="empty">加载中…</div>';
+      try {
+        const res = await fetch('/api/rooms');
+        const rooms = await res.json();
+        if (!rooms.length) {
+          list.innerHTML = '<div class="empty"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg><div>暂无活跃房间<br><span style="font-size:12px;color:var(--fg3)">点击"创建房间"开始使用</span></div></div>';
+          return;
+        }
+        list.innerHTML = rooms.map(r => `
+          <a class="room-card" href="/${r.id}">
+            <span class="icon">${r.encrypted ? '🔒' : '🌐'}</span>
+            <div class="info">
+              <div class="name">${esc(r.name)}</div>
+              <div class="meta">${r.encrypted ? '加密 · ' : '公开 · '}${r.online} 人在线</div>
+            </div>
+            <span class="badge ${r.online?'on':'off'}">${r.online ? r.online+' 在线' : '空'}</span>
+            <span class="actions">
+              <button class="btn-copy" title="分享链接" data-room-id="${r.id}" data-room-name="${esc(r.name)}" data-room-encrypted="${r.encrypted}">🔗</button>
+              <button class="btn-delete" title="删除房间" data-room-id="${r.id}" data-room-name="${esc(r.name)}">🗑️</button>
+            </span>
+          </a>
+        `).join('');
+      } catch(e) {
+        list.innerHTML = '<div class="empty">无法加载房间列表</div>';
+      }
+    }
+
+    function showCreateDlg() { document.getElementById('createDlg').classList.add('show'); document.getElementById('roomName').focus(); }
+    function hideCreateDlg() { document.getElementById('createDlg').classList.remove('show'); }
+
+    async function sha256(s) { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+
+    async function doCreate() {
+      const name = document.getElementById('roomName').value.trim();
+      const pwdRaw = document.getElementById('roomPwd').value.trim();
+      const delPwd = document.getElementById('delPwd').value.trim();
+      const visible = document.getElementById('roomVisible').checked;
+      if (!name) { toast('请输入房间名称'); return; }
+      if (!delPwd) { toast('请设置删除密码'); return; }
+      const pwd = pwdRaw ? await sha256(pwdRaw) : '';
+      try {
+        const res = await fetch('/api/rooms', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ name, password: pwd, deletionPassword: delPwd, visibleInLobby: visible })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          hideCreateDlg();
+          toast('房间已创建，正在进入…');
+          setTimeout(() => location.href = '/' + data.roomKey, 800);
+        } else {
+          const err = await res.json();
+          toast('创建失败: ' + (err.error || '未知错误'));
+        }
+      } catch(e) { toast('创建失败'); }
+    }
+
+    function showDelete(roomId, name) {
+      _currentDelRoom = roomId;
+      document.getElementById('delRoomName').textContent = name;
+      document.getElementById('deleteDlg').classList.add('show');
+      document.getElementById('delPwdInput').value = '';
+      document.getElementById('delPwdInput').focus();
+    }
+    function hideDeleteDlg() { document.getElementById('deleteDlg').classList.remove('show'); _currentDelRoom = null; }
+
+    async function doDelete() {
+      if (!_currentDelRoom) return;
+      const pwd = document.getElementById('delPwdInput').value.trim();
+      if (!pwd) { toast('请输入删除密码'); return; }
+      try {
+        const res = await fetch('/api/rooms/' + _currentDelRoom, {
+          method: 'DELETE', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ deletionPassword: pwd })
+        });
+        if (res.ok) {
+          hideDeleteDlg(); loadRooms(); toast('房间已删除');
+        } else {
+          toast('删除密码错误');
+        }
+      } catch(e) { toast('删除失败'); }
+    }
+
+    function showShare(roomId, name, encrypted) {
+      document.getElementById('shareDlg').classList.add('show');
+      if (encrypted) {
+        document.getElementById('shareLink').value = `${location.origin}/${roomId}`;
+        document.getElementById('shareHint').textContent = '加密房间需告知对方密码';
+      } else {
+        document.getElementById('shareLink').value = `${location.origin}/${roomId}`;
+        document.getElementById('shareHint').textContent = '公开房间，无需密码即可加入';
+      }
+    }
+    function hideShareDlg() { document.getElementById('shareDlg').classList.remove('show'); }
+    function copyShare() {
+      const link = document.getElementById('shareLink');
+      link.select();
+      navigator.clipboard?.writeText(link.value).then(() => toast('链接已复制')).catch(() => toast('复制失败'));
+    }
+
+    // Close dialogs on overlay click
+    document.querySelectorAll('.dialog-overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); }));
+    // Close on Escape
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideCreateDlg(); hideDeleteDlg(); hideShareDlg(); } });
+
+    loadRooms();
+    const pollTimer = setInterval(loadRooms, 15000);
+    window.addEventListener('beforeunload', () => clearInterval(pollTimer));
+
+    // Event delegation for room card buttons
+    document.getElementById('roomList').addEventListener('click', e => {
+      const btnCopy = e.target.closest('.btn-copy');
+      const btnDelete = e.target.closest('.btn-delete');
+      if (btnCopy) {
+        e.preventDefault();
+        e.stopPropagation();
+        showShare(btnCopy.dataset.roomId, btnCopy.dataset.roomName, btnCopy.dataset.roomEncrypted === 'true');
+      } else if (btnDelete) {
+        e.preventDefault();
+        e.stopPropagation();
+        showDelete(btnDelete.dataset.roomId, btnDelete.dataset.roomName);
+      }
+    });
+  </script>
 </body>
 </html>
