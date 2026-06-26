@@ -204,15 +204,23 @@ function json(data, status = 200) {
   });
 }
 
+function serveAsset(env, path) {
+  if (!env.ASSETS) {
+    return new Response('Assets not available', { status: 500, headers: SEC_HEADERS });
+  }
+  return env.ASSETS.fetch(new Request('https://x-relay' + path));
+}
+
 // ── 主 Worker ───────────────────────────────
 export default {
   async fetch(request, env, ctx) {
+    try {
     // 定期清理限流记录
     pruneRateMaps();
 
     // 尝试初始化 D1（未绑定时降级）
     let dbOk = false;
-    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1 init error:', e.message); }
+    try { await ensureSchema(env.DB); dbOk = true; } catch (e) { console.error('D1 init:', e.message); }
 
     if (!globalThis.__wss) globalThis.__wss = new WSSManager();
     const wss = globalThis.__wss;
@@ -220,23 +228,13 @@ export default {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
 
     // ── 路由 ──────────────────────────────────
-    // /          → index.html (大厅, Assets 自动)
-    // /chat      → chat.html (公共频道)
-    // /<roomKey> → chat.html (非静态文件 → 聊天室)
+    // /chat      → chat.html
     // /api/*     → Worker API
     // /ws/*      → Worker WebSocket
+    // 其他       → 静态文件(Assets) 或 chat.html(房间)
 
     if (url.pathname === '/chat') {
-      return env.ASSETS.fetch(new Request(new URL('/chat.html', request.url)));
-    }
-
-    // 房间路径: 非资源文件 → chat.html
-    if (url.pathname.length > 1 && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/') && !url.pathname.startsWith('/favicon')) {
-      const assetCheck = await env.ASSETS.fetch(new Request(new URL(url.pathname, request.url)));
-      if (assetCheck.status >= 400) {
-        return env.ASSETS.fetch(new Request(new URL('/chat.html', request.url)));
-      }
-      return assetCheck;
+      return serveAsset(env, '/chat.html');
     }
 
     // WebSocket 升级
@@ -442,7 +440,15 @@ export default {
       return json({ cleared: r.meta.changes });
     }
 
-    // 静态文件 — 委托给 Cloudflare Assets
-    return env.ASSETS.fetch(request);
+    // 静态文件 / 房间路径 — Assets 处理，不存在则 chat.html
+    return serveAsset(env, url.pathname).then(r => {
+      if (r.status >= 400) return serveAsset(env, '/chat.html');
+      return r;
+    });
+
+    } catch (e) {
+      console.error('Worker error:', e.message, e.stack);
+      return new Response('Internal Error: ' + e.message, { status: 500, headers: SEC_HEADERS });
+    }
   }
 };
