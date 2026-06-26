@@ -2,38 +2,52 @@
 
 ## 项目概述
 
-基于 WebRTC 的局域网 P2P 文字/文件传输工具，纯 Node.js 后端 + Vanilla JS 前端。
+基于 WebRTC 的局域网 P2P 文字/文件传输工具。双后端架构：Node.js（本地开发）和 Cloudflare Workers（生产部署）。
 
 ## 架构
 
 ```
-index.js  →  HTTP 路由 + WebSocket 信令
-auth.js   →  房间认证 (HMAC-SHA256)
-data.js   →  数据访问层 (桥接 DB 和内存)
-db.js     →  SQLite 持久化 (better-sqlite3)
-www/      →  静态前端 (Vanilla JS + WebRTC)
+www/        →  静态前端 (Vanilla JS + WebRTC)
+                  xchatuser.js  — WebRTC 数据通道（勿改）
+                  index.js      — 聊天室客户端
+                  lobby.html    — 大厅页面
+
+Node.js 版:
+  index.js  →  HTTP + WebSocket 服务器
+  auth.js   →  房间认证 (HMAC-SHA256)
+  data.js   →  数据访问层
+  db.js     →  SQLite (better-sqlite3)
+
+Cloudflare Workers 版:
+  worker.js →  全功能 Worker (HTTP + WS + D1)
+                  WSSManager   — WebSocket 连接池
+                  D1            — 持久化 (同 SQLite schema)
 ```
 
 ## 关键约定
 
-- **不要修改 `www/xchatuser.js`** — WebRTC 数据通道核心，改动极易导致 P2P 文件传输失败
-- **密码验证** — 统一走 `auth.js`，不要在 `index.js` 中直接写 crypto 逻辑
-- **持久化数据** — 全部在 SQLite，`data.js` 中的 `sockets` 对象是唯一内存状态（WebSocket 连接无法序列化）
-- **编码** — WebSocket URL 路径必须 `decodeURIComponent`（房间名可能含中文）
-- **缓存** — 修改 `www/` 下任何 JS/CSS 后，同步更新 `index.html` 中的 `?v=N` 版本号
-- **数据库** — 不要提交 `xrelay.db*` 文件，`.gitignore` 已排除
+- **不要改 `www/xchatuser.js`** — WebRTC 核心，改动极易导致 P2P 失败
+- **密码哈希统一** — `HMAC-SHA256(SHA256, roomKey)`，Node.js 版走 `auth.js`，Worker 版内联
+- **编码** — WebSocket URL 路径必须 `decodeURIComponent`
+- **缓存** — 改 `www/` 下 JS/CSS 后同步更新 `index.html` 中的 `?v=N`
+- **数据库** — 不提交 `xrelay.db*` 文件
+- **双版本同步** — 改 Node.js 版功能时，同步更新 `worker.js` 中对应逻辑
 
 ## 启动
 
 ```bash
-npm install
-npm run start        # 默认 8081
-npm run start 3000   # 指定端口
+# Node.js 版
+npm install && npm run start
+
+# Cloudflare Workers 版
+npx wrangler dev
 ```
 
-## 测试
+## 部署
 
 ```bash
-# 快速冒烟测试
-node -e "require('./auth'); require('./db'); require('./data'); console.log('OK')"
+# Workers 一键部署
+npx wrangler deploy
+
+# 或点击 README 中的 Deploy 按钮
 ```

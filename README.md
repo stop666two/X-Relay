@@ -5,7 +5,8 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](./package.json)
 [![GitHub](https://img.shields.io/badge/GitHub-stop666two%2FX--Relay-blue?logo=github)](https://github.com/stop666two/X-Relay)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
-[![Deploy to Cloudflare Pages](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/stop666two/X-Relay)
+
+<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/stop666two/X-Relay"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" /></a>
 
 ## ✨ 特性
 
@@ -40,11 +41,48 @@ npm run start [端口]    # 默认 8081
 
 打开浏览器访问 `http://localhost:8081`
 
-## ☁️ 一键部署
+## ☁️ 部署到 Cloudflare Workers
 
-点击上方 **Deploy to Cloudflare Pages** 按钮，即可一键将静态前端部署到 Cloudflare 全球 CDN。
+点击上方 **Deploy to Cloudflare Workers** 按钮，自动创建 Worker + D1 数据库，全球 CDN 加速，WebSocket 原生支持。
 
-> ⚠️ WebSocket 服务端仍需在 Node.js 环境中单独运行。
+部署后还需在 Cloudflare Dashboard 中绑定 D1：
+```bash
+# 创建 D1 数据库
+wrangler d1 create xrelay-db
+
+# 将返回的 database_id 填入 wrangler.toml
+# 然后重新部署
+wrangler deploy
+```
+
+### 局域网 / VPS 部署（Node.js 版）
+
+```bash
+npm install
+npm run start 8081
+
+# 其他设备访问 http://<IP>:8081
+```
+
+### Nginx 反向代理（可选）
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name relay.example.com;
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
 
 ## 📖 使用方式
 
@@ -112,11 +150,10 @@ npm run start [端口]    # 默认 8081
 
 ## 🛠 技术栈
 
-- **服务端**: Node.js + ws + better-sqlite3
+- **服务端**: Node.js + ws + better-sqlite3 ／ Cloudflare Workers + D1
 - **前端**: Vanilla JS + WebRTC + Material Design 3
 - **传输**: WebSocket（信令 / 消息）+ WebRTC DataChannel（文件）
 - **安全**: Web Crypto API（AES-GCM、PBKDF2、HMAC-SHA256）
-- **部署**: Cloudflare Pages + Node.js 服务端
 
 ## 🏛 架构
 
@@ -142,8 +179,6 @@ npm run start [端口]    # 默认 8081
 │  │                              │          │
 │  │ 内存: sockets  在线连接池     │          │
 │  └────────────────────────────┘          │
-├──────────────────────────────────────────┤
-│  Cloudflare Pages（静态前端 CDN）         │
 └──────────────────────────────────────────┘
 ```
 
@@ -151,12 +186,14 @@ npm run start [端口]    # 默认 8081
 
 ```
 X-Relay/
-├── index.js          # 服务入口 (HTTP + WebSocket)
+├── index.js          # 服务入口 (Node.js 版)
+├── worker.js         # 服务入口 (Cloudflare Workers 版)
 ├── auth.js           # 房间认证模块
 ├── data.js           # 数据访问层
 ├── db.js             # SQLite 持久化层
 ├── package.json
-├── wrangler.toml     # Cloudflare Pages 配置
+├── wrangler.toml     # Cloudflare Workers 部署配置
+├── schema.sql        # D1 数据库 Schema
 ├── room_pwd.json     # 预设加密房间（可选）
 └── www/
     ├── index.html     # 聊天室页面
